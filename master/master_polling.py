@@ -19,7 +19,7 @@
 # =============================================================================
 
 import sys
-sys.path.insert(0, "/Workspace/fgs_pipeline")   # Adjust to your repo path
+sys.path.insert(0, "/Workspace/Users/jon.payne@environment-agency.gov.uk/FGS_Notebooks")   # Adjust to your repo path
 
 
 # =============================================================================
@@ -37,7 +37,7 @@ print("STEP 1: Ingest FGS")
 print("=" * 60)
 
 ingest_result = dbutils.notebook.run(
-    path      = "/Workspace/fgs_pipeline/jobs/01_ingest_fgs",
+    path      = "/Workspace/Users/jon.payne@environment-agency.gov.uk/FGS_Notebooks/jobs/01_ingest_fgs",
     timeout_seconds = 300,    # 5 minutes -- fail if ingest takes longer
     arguments = {}
 )
@@ -63,7 +63,7 @@ print("STEP 2: Compute intersections")
 print("=" * 60)
 
 intersect_result = dbutils.notebook.run(
-    path      = "/Workspace/fgs_pipeline/jobs/07_compute_intersections",
+    path      = "/Workspace/Users/jon.payne@environment-agency.gov.uk/FGS_Notebooks/jobs/07_compute_intersections",
     timeout_seconds = 600,    # 10 minutes
     arguments = {"recompute_all": "false"}   # Only process the new statement
 )

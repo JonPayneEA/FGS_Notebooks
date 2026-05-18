@@ -16,7 +16,7 @@
 import sys
 import requests
 
-sys.path.insert(0, "/Workspace/fgs_pipeline")
+sys.path.insert(0, "/Workspace/Users/jon.payne@environment-agency.gov.uk/FGS_Notebooks/")
 from config import PARLIAMENT_API_BASE, PARLIAMENT_MEMBERS_PATH, TBL_MP_CONTACTS
 from utils.helpers import get_spark, utc_now
 
@@ -143,7 +143,7 @@ for i, member in enumerate(members):
     ))
 
 print(f"Parsed {len(mp_rows)} MP rows.")
-
+print(mp_rows)
 
 # =============================================================================
 # WRITE TO DELTA
@@ -159,7 +159,7 @@ mp_df = spark.createDataFrame(mp_rows)
     .format("delta")
     .mode("overwrite")
     .option("overwriteSchema", "true")
-    .saveAsTable(TBL_MP_CONTACTS)
+    #.saveAsTable(TBL_MP_CONTACTS)
 )
 print(f"Written {len(mp_rows)} rows to {TBL_MP_CONTACTS}.")
 

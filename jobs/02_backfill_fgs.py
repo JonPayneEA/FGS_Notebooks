@@ -13,7 +13,7 @@
 
 import sys
 
-sys.path.insert(0, "/Workspace/fgs_pipeline")
+sys.path.insert(0, "/Workspace/Users/jon.payne@environment-agency.gov.uk/FGS_Notebooks/")
 from config import (
     SECRET_SCOPE, SECRET_KEY, FFC_BASE_URL, FFC_STATEMENTS_PATH,
     TBL_STATEMENTS, TBL_RISK_POLYGONS, TBL_AOC_POLYGONS
