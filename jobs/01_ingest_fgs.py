@@ -23,12 +23,12 @@ import sys
 
 sys.path.insert(0, "/Workspace/fgs_pipeline")   # Adjust to your repo path in DASH
 from config import (
-    SECRET_SCOPE, SECRET_KEY, FFC_BASE_URL, FFC_STATEMENTS_PATH,
+    FFC_API_KEY, FFC_BASE_URL, FFC_STATEMENTS_PATH,
     POLL_START_HOUR, POLL_END_HOUR,
     TBL_STATEMENTS, TBL_RISK_POLYGONS, TBL_AOC_POLYGONS
 )
 from utils.helpers import (
-    get_ffc_api_key, get_spark, ffc_get, utc_now, table_exists,
+    get_spark, ffc_get, utc_now, table_exists,
     parse_statement_row, parse_risk_rows, parse_aoc_rows
 )
 
@@ -38,7 +38,7 @@ from utils.helpers import (
 # =============================================================================
 
 spark   = get_spark()
-api_key = get_ffc_api_key(SECRET_SCOPE, SECRET_KEY)
+api_key = FFC_API_KEY
 now     = utc_now()
 
 
@@ -114,28 +114,37 @@ stmt_df  = spark.createDataFrame([stmt_row])
 print(f"Written 1 row to {TBL_STATEMENTS}.")
 
 # --- fgs_risk_polygons: one row per polygon per source per day ---
+# Guard against empty list -- on low-risk days the API may return no polygons.
+# spark.createDataFrame([]) cannot infer a schema and will throw an error.
 risk_rows = parse_risk_rows(latest, now_iso)
-risk_df   = spark.createDataFrame(risk_rows)
-(
-    risk_df.write
-    .format("delta")
-    .mode("append")
-    .option("mergeSchema", "true")
-    .saveAsTable(TBL_RISK_POLYGONS)
-)
-print(f"Written {len(risk_rows)} rows to {TBL_RISK_POLYGONS}.")
+if risk_rows:
+    risk_df = spark.createDataFrame(risk_rows)
+    (
+        risk_df.write
+        .format("delta")
+        .mode("append")
+        .option("mergeSchema", "true")
+        .saveAsTable(TBL_RISK_POLYGONS)
+    )
+    print(f"Written {len(risk_rows)} rows to {TBL_RISK_POLYGONS}.")
+else:
+    print("No risk polygons in this FGS -- low risk day. Nothing written to risk polygons table.")
 
 # --- fgs_aoc_polygons: cartographic reference polygons ---
+# Same guard -- AOC polygons may also be absent on low-risk days.
 aoc_rows = parse_aoc_rows(latest, now_iso)
-aoc_df   = spark.createDataFrame(aoc_rows)
-(
-    aoc_df.write
-    .format("delta")
-    .mode("append")
-    .option("mergeSchema", "true")
-    .saveAsTable(TBL_AOC_POLYGONS)
-)
-print(f"Written {len(aoc_rows)} rows to {TBL_AOC_POLYGONS}.")
+if aoc_rows:
+    aoc_df = spark.createDataFrame(aoc_rows)
+    (
+        aoc_df.write
+        .format("delta")
+        .mode("append")
+        .option("mergeSchema", "true")
+        .saveAsTable(TBL_AOC_POLYGONS)
+    )
+    print(f"Written {len(aoc_rows)} rows to {TBL_AOC_POLYGONS}.")
+else:
+    print("No AOC polygons in this FGS. Nothing written to AOC polygons table.")
 
 print("FGS ingest complete.")
 dbutils.notebook.exit("success")

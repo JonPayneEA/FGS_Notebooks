@@ -16,21 +16,17 @@ from pyspark.sql import SparkSession, Row
 # Retrieves the FFC API key from Databricks Secrets.
 # Never hard-code the key in any script. Always fetch it at runtime this way.
 #
-# dbutils is a Databricks-specific object available automatically in notebooks
-# and jobs. You do not need to import it -- Databricks injects it at runtime.
+# Now superseded
+#
 # -----------------------------------------------------------------------------
-def get_ffc_api_key(secret_scope: str, secret_key: str) -> str:
-    """
-    Fetch the FFC API key from Databricks Secret Store.
+#def get_ffc_api_key() -> str:
+#    """Fetch the FFC API key from environment variables loaded via .env"""
+#    import os
+#    key = os.getenv("FFC_API_KEY")
+#    if not key:
+#        raise ValueError("FFC_API_KEY not found -- check your .env file is present and loaded")
+#    return key
 
-    Args:
-        secret_scope: The name of the secret scope (set in config.py).
-        secret_key:   The name of the key within that scope.
-
-    Returns:
-        The API key as a plain string.
-    """
-    return dbutils.secrets.get(scope=secret_scope, key=secret_key)
 
 
 # -----------------------------------------------------------------------------
@@ -67,7 +63,7 @@ def ffc_get(url: str, api_key: str, params: dict = None) -> dict:
     """
     # The FFC API authenticates via a Bearer token in the Authorization header.
     # Check the API docs if this header format changes in a future API version.
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {"X-API-Key": api_key}
 
     response = requests.get(url, headers=headers, params=params, timeout=30)
 

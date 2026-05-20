@@ -15,20 +15,23 @@
 #
 # Then substitute the scope and key names below if you used different names.
 # -----------------------------------------------------------------------------
-SECRET_SCOPE = "xxxx"       # The name of the secret scope you created
-SECRET_KEY = "xxx"          # The name of the secret within that scope
+from dotenv import load_dotenv
+import os
+
+load_dotenv()  # reads .env in the current working directory
+
+SECRET_SCOPE = None      # No Longer needed
+SECRET_KEY = None        # No Longer needed
+FFC_API_KEY = os.getenv("FFC_API_KEY")
 
 # -----------------------------------------------------------------------------
 # UNITY CATALOG
 # Three-part naming: catalog.schema.table
 # Substitute your actual catalog and schema names below.
 # -----------------------------------------------------------------------------
-#CATALOG = "your_catalog"            # e.g. "ea_flood" -- ask your DASH admin
-#SCHEMA  = "fgs"                     # Schema (database) within that catalog
+CATALOG = "prd_dash_lab"
+SCHEMA = "flood_forecasting_unrestricted"
 
-CATALOG = "/Workspace/Users/jon.payne@environment-agency.gov.uk/FGS_Notebooks/Data/"            # e.g. "ea_flood" -- ask your DASH admin
-SCHEMA  = "fgs_dev"                     # Schema (database) within that catalog
-spark.sql("CREATE SCHEMA IF NOT EXISTS /Workspace/Users/jon.payne@environment-agency.gov.uk/FGS_Notebooks/Data.fgs_dev")
 # Fully qualified table names built from the above.
 # If you change CATALOG or SCHEMA, everything updates automatically.
 TBL_STATEMENTS          = f"{CATALOG}.{SCHEMA}.fgs_statements"
@@ -47,8 +50,8 @@ TBL_FGS_CONST_INTERSECT = f"{CATALOG}.{SCHEMA}.fgs_constituency_intersections"
 # Base URL for the Flood Forecasting Centre API v3.
 # The statements endpoint returns the current and recent FGS records.
 # -----------------------------------------------------------------------------
-FFC_BASE_URL        = "https://api.foursources.metoffice.gov.uk"
-FFC_STATEMENTS_PATH = "/v3/statements"   # Adjust if the API path differs
+FFC_BASE_URL        = "https://api.ffc-environment-agency.fgs.metoffice.gov.uk"
+FFC_STATEMENTS_PATH = "/api/public/v3/statements"   # Adjust if the API path differs
 
 # -----------------------------------------------------------------------------
 # POLLING WINDOW
