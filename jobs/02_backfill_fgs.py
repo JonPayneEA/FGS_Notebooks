@@ -10,7 +10,7 @@
 #
 # Parsing logic is shared with 01_ingest_fgs.py via utils/helpers.py.
 # =============================================================================
-# Rmeove cached modules - remove this code when working 
+# Remove cached modules - remove this code when working 
 import importlib
 import utils.helpers
 importlib.reload(utils.helpers)

@@ -1,27 +1,18 @@
 # =============================================================================
+## =============================================================================
 # config.py
 # Central configuration for the FGS pipeline.
 # All settings live here. No other script should hard-code values.
 # =============================================================================
 
-# -----------------------------------------------------------------------------
-# DATABRICKS SECRET SCOPE
-# Before running any job, create your secret scope and store the API key.
-# Run these commands once in the Databricks CLI on your local machine:
-#
-#   databricks secrets create-scope fgs-pipeline
-#   databricks secrets put-secret fgs-pipeline ffc-api-key
-#       (you will be prompted to paste the key value)
-#
-# Then substitute the scope and key names below if you used different names.
-# -----------------------------------------------------------------------------
 from dotenv import load_dotenv
 import os
 
-load_dotenv()  # reads .env in the current working directory
+# In Databricks notebooks __file__ is not defined.
+# Use the Databricks workspace path directly instead.
+# Adjust this path to match where your .env file sits.
+load_dotenv("/Workspace/Users/jon.payne@environment-agency.gov.uk/FGS_Notebooks/.env")
 
-SECRET_SCOPE = None      # No Longer needed
-SECRET_KEY = None        # No Longer needed
 FFC_API_KEY = os.getenv("FFC_API_KEY")
 
 # -----------------------------------------------------------------------------
@@ -29,8 +20,8 @@ FFC_API_KEY = os.getenv("FFC_API_KEY")
 # Three-part naming: catalog.schema.table
 # Substitute your actual catalog and schema names below.
 # -----------------------------------------------------------------------------
-CATALOG = "prd_dash_lab"
-SCHEMA = "flood_forecasting_unrestricted"
+CATALOG = "prd_dash_lab"    # e.g. "lab" -- ask your DASH admin
+SCHEMA  = "flood_forecasting_unrestricted" 
 
 # Fully qualified table names built from the above.
 # If you change CATALOG or SCHEMA, everything updates automatically.
@@ -47,11 +38,10 @@ TBL_FGS_CONST_INTERSECT = f"{CATALOG}.{SCHEMA}.fgs_constituency_intersections"
 
 # -----------------------------------------------------------------------------
 # FFC API
-# Base URL for the Flood Forecasting Centre API v3.
-# The statements endpoint returns the current and recent FGS records.
+# Base URL and path for the Flood Forecasting Centre API v3.
 # -----------------------------------------------------------------------------
 FFC_BASE_URL        = "https://api.ffc-environment-agency.fgs.metoffice.gov.uk"
-FFC_STATEMENTS_PATH = "/api/public/v3/statements"   # Adjust if the API path differs
+FFC_STATEMENTS_PATH = "/api/public/v3/statements"
 
 # -----------------------------------------------------------------------------
 # POLLING WINDOW
@@ -71,29 +61,34 @@ POLL_END_HOUR   = 22    # Do not poll after this hour (UTC)
 EA_INTERSECTION_MIN_PCT = 0.25   # 25 percent minimum coverage
 
 # -----------------------------------------------------------------------------
-# EXTERNAL DATA SOURCES
-# EA flood areas are served via the EA's open data WFS.
-# Parliamentary boundaries are published by the ONS/Boundary Commission.
-# The Parliament API serves current MP details.
-# These URLs were correct as of April 2026 -- verify if jobs start failing.
+# EA FLOOD AREA BULK GEOJSON DOWNLOADS
+# These return all features in a single call.
+# Update the limit parameter if the total area count exceeds 5000.
 # -----------------------------------------------------------------------------
-EA_WFS_BASE_URL = (
-    "https://environment.data.gov.uk/spatialdata/flood-map-for-planning/"
-    "wfs?service=WFS&version=2.0.0&request=GetFeature"
-    "&outputFormat=application/json"
+EA_FWA_GEOJSON_URL = (
+    "https://environment.data.gov.uk/geoservices/datasets/"
+    "87e5d78f-d465-11e4-9343-f0def148f590/ogc/features/v1/collections/"
+    "Flood_Warning_Areas/items?f=application%2Fgeo%2Bjson&limit=5000"
 )
-EA_FWA_TYPENAME = "EA.FloodMapForPlanning:FloodAlertAndWarningAreas_FWA"
-EA_FAA_TYPENAME = "EA.FloodMapForPlanning:FloodAlertAndWarningAreas_FAA"
+EA_FAA_GEOJSON_URL = (
+    "https://environment.data.gov.uk/geoservices/datasets/"
+    "864c72de-d465-11e4-855f-f0def148f590/ogc/features/v1/collections/"
+    "Flood_Alert_Areas/items?f=application%2Fgeo%2Bjson&limit=5000"
+)
 
-# ONS constituency boundaries -- GeoJSON from the Open Geography Portal.
-# This URL points to the 2024 parliamentary constituency boundaries.
-# Update the URL after any boundary review.
+# -----------------------------------------------------------------------------
+# PARLIAMENTARY BOUNDARIES
+# ONS constituency boundaries -- 2024 release, generalised (BGC).
+# Update this URL after any boundary review.
+# -----------------------------------------------------------------------------
 ONS_CONSTITUENCIES_URL = (
     "https://services1.arcgis.com/ESMARspQHYMw9BZ9/arcgis/rest/services/"
     "Westminster_Parliamentary_Constituencies_July_2024_Boundaries_UK_BGC/"
     "FeatureServer/0/query?where=1%3D1&outFields=*&f=geojson"
 )
 
-# Parliament Members API -- returns current MPs with constituency linkage.
-PARLIAMENT_API_BASE  = "https://members-api.parliament.uk/api"
-PARLIAMENT_MEMBERS_PATH = "/Members/Search?House=Commons&IsCurrentMember=true&take=650"
+# -----------------------------------------------------------------------------
+# PARLIAMENT MEMBERS API
+# Returns current MPs with constituency linkage. No authentication required.
+# -----------------------------------------------------------------------------
+PARLIAMENT_API_BASE     = "https://members-api.parliament.uk/api"
