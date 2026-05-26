@@ -10,24 +10,52 @@ from datetime import datetime, timezone, date, timedelta
 
 from pyspark.sql import SparkSession, Row
 
-
-# -----------------------------------------------------------------------------
-# get_ffc_api_key
-# Retrieves the FFC API key from Databricks Secrets.
-# Never hard-code the key in any script. Always fetch it at runtime this way.
+# =============================================================================
+# RISK MATRIX LOOKUPS
+# The FGS risk matrix is 4x4.
+# X axis (horizontal) = Impact:     1=Minimal, 2=Minor, 3=Significant, 4=Severe
+# Y axis (vertical)   = Likelihood: 1=Very Low, 2=Low, 3=Medium, 4=High
 #
-# Now superseded
-#
-# -----------------------------------------------------------------------------
-#def get_ffc_api_key() -> str:
-#    """Fetch the FFC API key from environment variables loaded via .env"""
-#    import os
-#    key = os.getenv("FFC_API_KEY")
-#    if not key:
-#        raise ValueError("FFC_API_KEY not found -- check your .env file is present and loaded")
-#    return key
+# Overall risk and colour are derived from the combination of x and y.
+# Source: FGS User Guide (https://www.gov.uk/government/publications/
+# flood-forecasting-centre-services-flood-guidance-statement/
+# flood-guidance-statement-user-guide)
+# =============================================================================
 
+IMPACT_LABELS = {
+    1: "Minimal",
+    2: "Minor",
+    3: "Significant",
+    4: "Severe",
+}
 
+LIKELIHOOD_LABELS = {
+    1: "Very Low",
+    2: "Low",
+    3: "Medium",
+    4: "High",
+}
+
+# Risk level derived from (x=impact, y=likelihood) matrix position.
+# Matches Table 1 in the FGS User Guide exactly.
+RISK_MATRIX = {
+    (1, 1): ("Very Low", "Green"),
+    (2, 1): ("Very Low", "Green"),
+    (3, 1): ("Low",      "Yellow"),
+    (4, 1): ("Low",      "Yellow"),
+    (1, 2): ("Very Low", "Green"),
+    (2, 2): ("Very Low", "Green"),
+    (3, 2): ("Low",      "Yellow"),
+    (4, 2): ("Medium",   "Amber"),
+    (1, 3): ("Very Low", "Green"),
+    (2, 3): ("Low",      "Yellow"),
+    (3, 3): ("Medium",   "Amber"),
+    (4, 3): ("Medium",   "Amber"),
+    (1, 4): ("Very Low", "Green"),
+    (2, 4): ("Low",      "Yellow"),
+    (3, 4): ("Medium",   "Amber"),
+    (4, 4): ("High",     "Red"),
+}
 
 # -----------------------------------------------------------------------------
 # get_spark
@@ -248,6 +276,17 @@ def parse_risk_rows(statement: dict, ingested_at: str) -> list:
                     # One row per source so risk level is always a simple
                     # integer pair, never a nested structure.
                     for source, levels in risk_levels.items():
+                        # levels is [x, y] -- impact and likelihood coordinates.
+                        risk_x = levels[0]
+                        risk_y = levels[1]
+
+                        # Derive human-readable labels from the matrix position.
+                        impact_label     = IMPACT_LABELS.get(risk_x, "Unknown")
+                        likelihood_label = LIKELIHOOD_LABELS.get(risk_y, "Unknown")
+                        risk_level, risk_colour = RISK_MATRIX.get(
+                            (risk_x, risk_y), ("Unknown", "Unknown")
+                        )
+
                         rows.append(Row(
                             statement_id       = statement["id"],
                             issued_at          = statement["issued_at"],
@@ -257,8 +296,12 @@ def parse_risk_rows(statement: dict, ingested_at: str) -> list:
                             day_index          = day_index,
                             forecast_date      = forecast_date,
                             source             = source,
-                            risk_level_min     = levels[0],
-                            risk_level_max     = levels[1],
+                            risk_x             = risk_x,
+                            risk_y             = risk_y,
+                            impact_label       = impact_label,
+                            likelihood_label   = likelihood_label,
+                            risk_level         = risk_level,
+                            risk_colour        = risk_colour,
                             poly_type          = poly.get("poly_type"),
                             beyond_five_days   = risk_area.get("beyond_five_days", False),
                             geometry           = geojson_str,
