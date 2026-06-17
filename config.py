@@ -45,12 +45,12 @@ FFC_STATEMENTS_PATH = "/api/public/v3/statements"
 
 # -----------------------------------------------------------------------------
 # POLLING WINDOW
-# The FGS is issued between 10:00 and 22:00.
-# The polling job runs every 30 minutes within this window.
+# The FGS is issued between 10:00 and 22:00. Padding extra hours.
+# The polling job runs every 60 minutes within this window.
 # Times are UTC -- adjust if the EA operates on local time.
 # -----------------------------------------------------------------------------
-POLL_START_HOUR = 10    # Do not poll before this hour (UTC)
-POLL_END_HOUR   = 22    # Do not poll after this hour (UTC)
+POLL_START_HOUR = 9    # Do not poll before this hour (UTC)
+POLL_END_HOUR   = 23    # Do not poll after this hour (UTC)
 
 # -----------------------------------------------------------------------------
 # SPATIAL INTERSECTION THRESHOLD
