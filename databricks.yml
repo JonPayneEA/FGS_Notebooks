@@ -1,0 +1,29 @@
+# =============================================================================
+# databricks.yml
+# Databricks Asset Bundle for the FGS pipeline. Only needed if you run the
+# pipeline with Workflows (see workflows/databricks_workflows.yml). If you use
+# the master/ notebooks and the Schedule button instead, ignore this file.
+# =============================================================================
+
+bundle:
+  name: fgs_pipeline
+
+include:
+  - workflows/*.yml
+
+variables:
+  cluster_id:
+    description: Existing cluster that runs the pipeline tasks (ask your DASH admin).
+
+targets:
+  prd:
+    mode: production
+    default: true
+    workspace:
+      # Replace with the workspace URL for your DASH environment.
+      host: https://REPLACE-WITH-YOUR-WORKSPACE.cloud.databricks.com
+    variables:
+      cluster_id: REPLACE-WITH-CLUSTER-ID
+    # Set run_as to a service principal so jobs do not depend on one person:
+    # run_as:
+    #   service_principal_name: "<application-id>"

@@ -1,173 +1,194 @@
 # =============================================================================
 # workflows/databricks_workflows.yml
-# Databricks Workflows definitions for the FGS pipeline.
+# Databricks Workflows definitions for the pipeline (Asset Bundle resources).
 #
-# There are three workflows, one per cadence:
-#   1. fgs_polling_workflow      -- every 30 minutes, 10:00-22:00 UTC
-#   2. fgs_weekly_workflow       -- weekly, Sunday 02:00 UTC
-#   3. fgs_quarterly_workflow    -- quarterly (or manually after an election)
-#
-# HOW TO DEPLOY:
-# Copy these definitions into the Databricks Workflows UI, or deploy via
-# the Databricks CLI:
+# Included by ../databricks.yml. Deploy with:
+#   databricks bundle validate
 #   databricks bundle deploy
 #   databricks bundle run fgs_polling_workflow
 #
-# Adjust cluster_id or cluster settings to match your DASH environment.
-# Ask your DASH admin for the correct cluster ID or policy ID.
+# USE EITHER THESE WORKFLOWS OR THE master/ NOTEBOOKS, NOT BOTH. They run the
+# same cadences; scheduling both would run every job twice.
 #
-# All paths assume the repo is mounted at /Workspace/fgs_pipeline.
-# Adjust if your repo lives elsewhere in the Databricks workspace.
+# Notebook paths are relative to this file, so nothing depends on where the
+# repo is mounted. Set the cluster in databricks.yml (variable cluster_id).
+#
+# Workflows:
+#   1. fgs_polling_workflow   -- FGS ingest + intersections, and flood warnings
+#   2. fgs_weekly_workflow    -- weekly, Sunday 02:00 UTC
+#   3. fgs_quarterly_workflow -- quarterly (or run manually after an election)
+#   4. ea_rt_daily_workflow   -- daily EA real-time archive ingest
+#
+# FIRST RUN: run 02_backfill_fgs once, then 07_compute_intersections once with
+# recompute_all=true, before enabling the schedules.
 # =============================================================================
-
-
-# -----------------------------------------------------------------------------
-# WORKFLOW 1: FGS POLLING
-# Runs every 30 minutes between 10:00 and 22:00 UTC.
-# The ingest job checks the time window itself and exits cleanly outside it,
-# so the schedule can safely fire at all hours -- only the window matters.
-#
-# Task dependency:
-#   01_ingest_fgs  -->  07_compute_intersections (only if ingest found new data)
-# -----------------------------------------------------------------------------
 
 resources:
   jobs:
 
+    # -------------------------------------------------------------------------
+    # WORKFLOW 1: POLLING
+    # The ingest notebook checks the polling window itself (config.py, UTC) and
+    # exits cleanly outside it, so the schedule can fire all day.
+    #
+    #   ingest_fgs --> compute_intersections      (runs even if ingest found
+    #                                              nothing new, or failed, so a
+    #                                              failed intersection run is
+    #                                              retried; it exits "no_work"
+    #                                              quickly when idle)
+    #   flood_warnings                            (independent: never blocked by
+    #                                              the FGS tasks)
+    #
+    # Adjust the cron to the cadence you can run (every 30 or 60 minutes).
+    # -------------------------------------------------------------------------
     fgs_polling_workflow:
       name: "FGS Polling Workflow"
+      max_concurrent_runs: 1
       schedule:
         quartz_cron_expression: "0 0/30 * * * ?"   # Every 30 minutes
         timezone_id: "UTC"
         pause_status: "UNPAUSED"
 
       tasks:
-
         - task_key: "ingest_fgs"
-          description: "Poll FFC API and ingest new FGS if available"
+          description: "Poll FFC API and ingest a new or modified FGS if available"
           notebook_task:
-            notebook_path: "/Workspace/fgs_pipeline/jobs/01_ingest_fgs"
-          # Use an existing cluster to avoid cold-start delay on every poll.
-          # Replace with your DASH cluster ID.
-          existing_cluster_id: "YOUR_CLUSTER_ID"
+            notebook_path: "../jobs/01_ingest_fgs.ipynb"
+          existing_cluster_id: ${var.cluster_id}
+          timeout_seconds: 300
 
         - task_key: "compute_intersections"
-          description: "Intersect new FGS polygons against EA areas and constituencies"
+          description: "Intersect statements lacking an up-to-date log entry"
           depends_on:
             - task_key: "ingest_fgs"
-              # Only run this task if ingest succeeded and found new data.
-              # If ingest exited with "no_change" or "outside_window", skip it.
-              outcome: "success"
+          run_if: ALL_DONE
           notebook_task:
-            notebook_path: "/Workspace/fgs_pipeline/jobs/07_compute_intersections"
+            notebook_path: "../jobs/07_compute_intersections.ipynb"
             base_parameters:
-              recompute_all: "false"   # Only process newly ingested statements
-          existing_cluster_id: "YOUR_CLUSTER_ID"
+              recompute_all: "false"
+          existing_cluster_id: ${var.cluster_id}
+          timeout_seconds: 600
+
+        - task_key: "flood_warnings"
+          description: "Fetch EA flood warnings and alerts; update current state and log"
+          notebook_task:
+            notebook_path: "../jobs/11_flood_warnings_ingest.ipynb"
+          existing_cluster_id: ${var.cluster_id}
+          timeout_seconds: 300
 
 
     # -------------------------------------------------------------------------
     # WORKFLOW 2: WEEKLY REFRESH
-    # Runs Sunday 02:00 UTC.
-    # Refreshes EA flood areas and MP details, then recomputes the lookup table.
+    #   refresh_ea_flood_areas \
+    #                           --> compute_lookup --> recompute_intersections
+    #   refresh_mp_details     /
     #
-    # Task dependency chain:
-    #   03_refresh_ea_flood_areas  \
-    #                               --> 06_compute_lookup --> 07_compute_intersections
-    #   04_refresh_mp_details      /
-    #
-    # EA areas and MP details refresh in parallel (no dependency between them).
-    # Lookup table recomputes after both complete.
-    # Intersections rerun after lookup is fresh (recompute_all=true to catch any
-    # EA boundary changes that affect historical FGS records).
+    # The two refreshes run in parallel. recompute_all is safe to run weekly:
+    # each statement's rows are replaced, never duplicated.
     # -------------------------------------------------------------------------
-
     fgs_weekly_workflow:
       name: "FGS Weekly Refresh"
+      max_concurrent_runs: 1
       schedule:
         quartz_cron_expression: "0 0 2 ? * SUN"   # Sunday 02:00 UTC
         timezone_id: "UTC"
         pause_status: "UNPAUSED"
 
       tasks:
-
         - task_key: "refresh_ea_flood_areas"
-          description: "Refresh EA Flood Warning and Flood Alert Areas from WFS"
+          description: "Refresh EA Flood Warning and Flood Alert Areas"
           notebook_task:
-            notebook_path: "/Workspace/fgs_pipeline/jobs/03_refresh_ea_flood_areas"
-          existing_cluster_id: "YOUR_CLUSTER_ID"
+            notebook_path: "../jobs/03_refresh_ea_flood_areas.ipynb"
+          existing_cluster_id: ${var.cluster_id}
 
         - task_key: "refresh_mp_details"
           description: "Refresh MP contact details from Parliament API"
           notebook_task:
-            notebook_path: "/Workspace/fgs_pipeline/jobs/04_refresh_mp_details"
-          existing_cluster_id: "YOUR_CLUSTER_ID"
-          # No dependency on refresh_ea_flood_areas -- these run in parallel.
+            notebook_path: "../jobs/04_refresh_mp_details.ipynb"
+          existing_cluster_id: ${var.cluster_id}
 
         - task_key: "compute_lookup"
           description: "Recompute EA area / constituency lookup table"
           depends_on:
             - task_key: "refresh_ea_flood_areas"
-              outcome: "success"
             - task_key: "refresh_mp_details"
-              outcome: "success"
           notebook_task:
-            notebook_path: "/Workspace/fgs_pipeline/jobs/06_compute_lookup"
-          existing_cluster_id: "YOUR_CLUSTER_ID"
+            notebook_path: "../jobs/06_compute_lookup.ipynb"
+          existing_cluster_id: ${var.cluster_id}
 
         - task_key: "recompute_intersections"
           description: "Recompute all FGS intersections against refreshed EA areas"
           depends_on:
             - task_key: "compute_lookup"
-              outcome: "success"
           notebook_task:
-            notebook_path: "/Workspace/fgs_pipeline/jobs/07_compute_intersections"
+            notebook_path: "../jobs/07_compute_intersections.ipynb"
             base_parameters:
-              recompute_all: "true"   # Reprocess all history against fresh boundaries
-          existing_cluster_id: "YOUR_CLUSTER_ID"
+              recompute_all: "true"
+          existing_cluster_id: ${var.cluster_id}
+          timeout_seconds: 7200
 
 
     # -------------------------------------------------------------------------
     # WORKFLOW 3: QUARTERLY BOUNDARY REFRESH
-    # Run manually or on a quarterly schedule.
-    # Must also be run immediately after a general election or boundary review.
+    # Run manually straight after a general election or boundary review; do not
+    # wait for the schedule. Also run the weekly workflow to refresh MPs.
     #
-    # Task dependency chain:
-    #   05_refresh_boundaries --> 06_compute_lookup --> 07_compute_intersections
+    #   refresh_boundaries --> compute_lookup --> recompute_intersections
     # -------------------------------------------------------------------------
-
     fgs_quarterly_workflow:
       name: "FGS Quarterly Boundary Refresh"
+      max_concurrent_runs: 1
       schedule:
-        # First day of each quarter at 03:00 UTC.
-        # Run manually after a general election -- don't wait for the schedule.
-        quartz_cron_expression: "0 0 3 1 1,4,7,10 ?"
+        quartz_cron_expression: "0 0 3 1 1,4,7,10 ?"   # 03:00 UTC, first day of each quarter
         timezone_id: "UTC"
         pause_status: "UNPAUSED"
 
       tasks:
-
         - task_key: "refresh_boundaries"
           description: "Refresh parliamentary constituency boundaries from ONS"
           notebook_task:
-            notebook_path: "/Workspace/fgs_pipeline/jobs/05_refresh_boundaries"
-          existing_cluster_id: "YOUR_CLUSTER_ID"
+            notebook_path: "../jobs/05_refresh_boundaries.ipynb"
+          existing_cluster_id: ${var.cluster_id}
 
         - task_key: "compute_lookup"
           description: "Recompute EA area / constituency lookup table"
           depends_on:
             - task_key: "refresh_boundaries"
-              outcome: "success"
           notebook_task:
-            notebook_path: "/Workspace/fgs_pipeline/jobs/06_compute_lookup"
-          existing_cluster_id: "YOUR_CLUSTER_ID"
+            notebook_path: "../jobs/06_compute_lookup.ipynb"
+          existing_cluster_id: ${var.cluster_id}
 
         - task_key: "recompute_intersections"
           description: "Recompute all FGS intersections against new boundaries"
           depends_on:
             - task_key: "compute_lookup"
-              outcome: "success"
           notebook_task:
-            notebook_path: "/Workspace/fgs_pipeline/jobs/07_compute_intersections"
+            notebook_path: "../jobs/07_compute_intersections.ipynb"
             base_parameters:
               recompute_all: "true"
-          existing_cluster_id: "YOUR_CLUSTER_ID"
+          existing_cluster_id: ${var.cluster_id}
+          timeout_seconds: 7200
+
+
+    # -------------------------------------------------------------------------
+    # WORKFLOW 4: EA REAL-TIME DAILY ARCHIVE
+    # The archive file for a day is generated at 22:00 the following day, so
+    # this runs at 23:00 UTC. 10_ea_rt_daily_archive registers any new measures
+    # itself (it calls 09_ea_rt_measure_register), and exits "no_file" -- which
+    # fails this run -- if the file is not yet available.
+    # -------------------------------------------------------------------------
+    ea_rt_daily_workflow:
+      name: "EA Real-Time Daily Archive"
+      max_concurrent_runs: 1
+      schedule:
+        quartz_cron_expression: "0 0 23 * * ?"   # 23:00 UTC daily
+        timezone_id: "UTC"
+        pause_status: "UNPAUSED"
+
+      tasks:
+        - task_key: "daily_archive"
+          description: "Land yesterday's EA readings archive to Bronze"
+          notebook_task:
+            notebook_path: "../jobs/10_ea_rt_daily_archive.ipynb"
+          existing_cluster_id: ${var.cluster_id}
+          timeout_seconds: 7200
