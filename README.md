@@ -125,22 +125,27 @@ flowchart TD
 ### Polling (Master_polling, every 30 or 60 minutes)
 
 Every step runs on every poll. A failure is recorded and the later steps still
-run, then the notebook raises at the end so the run is marked as failed.
+run, then the notebook raises at the end so the run is marked as failed. The
+exit values (`outside_window`, `no_change`, `no_work`) are normal outcomes, not
+failures.
 
 ```mermaid
 flowchart TD
     start(["Master_polling run"]) --> S1["Step 1: 01_ingest_fgs"]
     S1 --> D0{"Inside the UTC<br/>polling window?"}
-    D0 -- no --> S2
+    D0 -- no --> X0["Exit outside_window"]
     D0 -- yes --> D1{"New or modified<br/>statement?"}
-    D1 -- no --> S2
-    D1 -- yes --> W1["Replace risk and AOC rows,<br/>then the statement row"]
+    D1 -- no --> X1["Exit no_change"]
+    D1 -- yes --> W1["Replace risk and AOC rows,<br/>then the statement row<br/>Exit success"]
+    X0 --> S2
+    X1 --> S2
     W1 --> S2["Step 2: 07_compute_intersections<br/>(incremental)"]
     S2 --> D2{"Statements without an<br/>up-to-date log entry?"}
-    D2 -- no --> S3
-    D2 -- yes --> W2["Per statement: delete and rewrite<br/>EA and constituency rows,<br/>then write the log row"]
-    W2 --> S3["Step 3: 11_flood_warnings_ingest"]
-    S3 --> W3["Append NEW, CHANGE and CLOSED events<br/>to the log, then overwrite current state"]
+    D2 -- no --> X2["Exit no_work<br/>(nothing to compute)"]
+    D2 -- yes --> W2["Per statement: delete and rewrite<br/>EA and constituency rows,<br/>then write the log row<br/>Exit success"]
+    X2 --> S3
+    W2 --> S3["Step 3: 11_flood_warnings_ingest<br/>(no window check)"]
+    S3 --> W3["Append NEW, CHANGE and CLOSED events<br/>to the log, then overwrite current state<br/>Exit success or no_change"]
     W3 --> D3{"Did any step fail?"}
     D3 -- yes --> F(["Raise: run marked failed"])
     D3 -- no --> OK(["Exit success"])
