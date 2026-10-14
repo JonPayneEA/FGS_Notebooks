@@ -1,2 +1,5 @@
 # Block API keys making it into github
 .env
+# Python / test artefacts
+__pycache__/
+.pytest_cache/
