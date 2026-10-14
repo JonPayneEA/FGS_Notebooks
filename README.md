@@ -9,26 +9,36 @@ constituencies. It also lands EA real-time flood warnings and river readings.
 
 ## Before you start
 
-### 1. Set up the Databricks secret scope
+### 1. Provide the FFC API key
 
-Run this once from the Databricks CLI on your local machine. You need the
-Databricks CLI installed and configured first.
+`config.get_ffc_api_key()` looks for the key in this order and uses the first it
+finds:
 
-```bash
-databricks secrets create-scope fgs-pipeline
-databricks secrets put-secret fgs-pipeline ffc-api-key
-# Paste your FFC API key when prompted
-```
+1. **A Databricks secret** (preferred, if you can create a scope). Run once from
+   the Databricks CLI on your local machine:
 
-The key is read in `config.py` by `get_ffc_api_key()`. For local development set
-the `FFC_API_KEY` environment variable instead. To request a key, email
-ffcenquiries@environment-agency.gov.uk (see the FGS Public API documentation).
+   ```bash
+   databricks secrets create-scope fgs-pipeline
+   databricks secrets put-secret fgs-pipeline ffc-api-key
+   # Paste your FFC API key when prompted
+   ```
+
+2. **The `FFC_API_KEY` environment variable.**
+3. **A `.env` file** next to `config.py`, with a line `FFC_API_KEY=your-key`.
+   `.env` is in `.gitignore`, so it is never committed. If your existing `.env` is
+   in your Git folder, there is nothing to change. If you clone the repo into a new
+   folder, copy it across, or point `FGS_ENV_FILE` at its path. `python-dotenv` is
+   not needed.
+
+A `.env` file is plain text, so anyone who can open that folder can read the key. A
+secret scope is the safer home for it if your permissions allow. To request a key,
+email ffcenquiries@environment-agency.gov.uk (see the FGS Public API documentation).
 
 ### 2. Check config.py
 
 - `CATALOG` and `SCHEMA` -- where the tables live (currently
   `prd_dash_lab.flood_forecasting_unrestricted`).
-- `SECRET_SCOPE` and `SECRET_KEY` -- only if you used different names above.
+- `SECRET_SCOPE` and `SECRET_KEY` -- only if you used different names for the secret.
 - `POLL_START_HOUR` / `POLL_END_HOUR` -- the polling window, in UTC.
 
 Everything else can be left as is unless an external URL changes.
