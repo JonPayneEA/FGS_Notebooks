@@ -274,8 +274,10 @@ Notes on the table:
   stay so a closing warning is still visible. Severity 3 is a Flood Alert.
 - `ea_area_type` says whether the area is a `flood_warning` or `flood_alert` area.
 - `share_of_area_in_constituency` is the share of the warning area that lies in
-  that constituency. Set `WARNING_CONTACT_MIN_PCT` in `config.py` to drop links
-  where a warning only clips the edge of a constituency, or filter on this column.
+  that constituency. Links below 1% are not written, so an MP is not linked to a
+  warning that only clips the edge of their constituency. Change
+  `WARNING_CONTACT_MIN_PCT` in `config.py` (0.0 keeps every real overlap), or
+  filter on this column at query time.
 - `mp_matched = false` marks a constituency with no matching MP: a vacancy, or a
   name that differs between the ONS and Parliament sources. The MP is matched on
   a normalised name (lower case, accents folded, `&` as `and`). Each run lists the

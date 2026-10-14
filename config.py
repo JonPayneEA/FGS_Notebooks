@@ -103,12 +103,12 @@ MIN_OVERLAP_AREA_M2     = 1.0    # Square metres in EPSG:27700
 
 # flood_warning_constituency_contacts: a warning or alert is linked to a
 # constituency when at least this share of the warning AREA lies inside it
-# (the intersection_pct in ea_area_constituency_lookup). 0.0 keeps every real
-# overlap, matching fgs_constituency_intersections. Raise it (for example to
-# 0.05) to stop an MP being linked to a warning that only clips the edge of
-# their constituency. intersection_pct is carried in the table so you can also
-# filter at query time.
-WARNING_CONTACT_MIN_PCT = 0.0
+# (the intersection_pct in ea_area_constituency_lookup). 0.01 means 1 percent:
+# it stops an MP being linked to a warning that only clips the edge of their
+# constituency. Set 0.0 to keep every real overlap, matching
+# fgs_constituency_intersections. share_of_area_in_constituency is carried in
+# the table, so you can also filter harder at query time.
+WARNING_CONTACT_MIN_PCT = 0.01
 
 # -----------------------------------------------------------------------------
 # EA FLOOD AREA BULK GEOJSON DOWNLOADS
