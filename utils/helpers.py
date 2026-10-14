@@ -360,14 +360,38 @@ RISK_SCHEMA = StructType([
 ])
 
 AOC_SCHEMA = StructType([
-    StructField("statement_id", LongType(),   True),
-    StructField("issued_at",    StringType(), True),
-    StructField("aoc_map_id",   LongType(),   True),
-    StructField("poly_id",      LongType(),   True),
-    StructField("poly_type",    StringType(), True),
-    StructField("geometry_type", StringType(), True),
-    StructField("geometry",     StringType(), True),
-    StructField("ingested_at",  StringType(), True),
+    StructField("statement_id",        LongType(),   True),
+    StructField("issued_at",           StringType(), True),
+    StructField("aoc_map_id",          LongType(),   True),
+    StructField("poly_id",             LongType(),   True),
+    # The risk area block this AOC polygon belongs to. It carries the flood
+    # source, forecast days and impact/likelihood (see fgs_risk_blocks).
+    StructField("risk_area_block_id",  LongType(),   True),
+    StructField("poly_type",           StringType(), True),
+    StructField("geometry_type",       StringType(), True),
+    StructField("geometry",            StringType(), True),
+    StructField("ingested_at",         StringType(), True),
+])
+
+# One row per risk area block, forecast day and flood source. No geometry: this
+# is the link table between risk polygons (fgs_risk_polygons) and Area of
+# Concern polygons (fgs_aoc_polygons), which both carry risk_area_block_id.
+BLOCK_SCHEMA = StructType([
+    StructField("statement_id",       LongType(),    True),
+    StructField("issued_at",          StringType(),  True),
+    StructField("risk_area_id",       LongType(),    True),
+    StructField("risk_area_block_id", LongType(),    True),
+    StructField("day_index",          LongType(),    True),
+    StructField("forecast_date",      StringType(),  True),
+    StructField("source",             StringType(),  True),
+    StructField("risk_x",             LongType(),    True),
+    StructField("risk_y",             LongType(),    True),
+    StructField("impact_label",       StringType(),  True),
+    StructField("likelihood_label",   StringType(),  True),
+    StructField("risk_level",         StringType(),  True),
+    StructField("risk_colour",        StringType(),  True),
+    StructField("beyond_five_days",   BooleanType(), True),
+    StructField("ingested_at",        StringType(),  True),
 ])
 
 
@@ -418,6 +442,50 @@ def parse_statement_row(statement: dict, ingested_at: str) -> Row:
 
 
 # -----------------------------------------------------------------------------
+# _risk_fields
+# The risk attributes of one (risk area block, forecast day, flood source).
+# Shared by parse_risk_rows and parse_block_rows so both always agree.
+# -----------------------------------------------------------------------------
+def _risk_fields(statement: dict, risk_area: dict, block: dict,
+                 day_index: int, source: str, levels) -> dict:
+    """
+    Return the derived risk fields for one block/day/source, or None when
+    risk_levels for that source is unusable (a warning is printed).
+
+    levels is [x, y]: impact and likelihood matrix coordinates.
+    """
+    if not isinstance(levels, (list, tuple)) or len(levels) < 2:
+        print(
+            f"WARNING: statement {statement['id']} block {block.get('id')} "
+            f"source {source!r} has unusable risk_levels {levels!r}; skipped."
+        )
+        return None
+
+    risk_x = int(levels[0])
+    risk_y = int(levels[1])
+    issued_date = date.fromisoformat(statement["issued_at"][:10])
+
+    # day_index 1 = the day the FGS was issued, so subtract 1.
+    forecast_date = (issued_date + timedelta(days=day_index - 1)).isoformat()
+    risk_level, risk_colour = RISK_MATRIX.get((risk_x, risk_y), ("Unknown", "Unknown"))
+
+    return {
+        "risk_area_id":       risk_area["id"],
+        "risk_area_block_id": block["id"],
+        "day_index":          day_index,
+        "forecast_date":      forecast_date,
+        "source":             source,
+        "risk_x":             risk_x,
+        "risk_y":             risk_y,
+        "impact_label":       IMPACT_LABELS.get(risk_x, "Unknown"),
+        "likelihood_label":   LIKELIHOOD_LABELS.get(risk_y, "Unknown"),
+        "risk_level":         risk_level,
+        "risk_colour":        risk_colour,
+        "beyond_five_days":   bool(risk_area.get("beyond_five_days", False)),
+    }
+
+
+# -----------------------------------------------------------------------------
 # parse_risk_rows
 # Explodes the nested risk_areas -> risk_area_blocks -> polys structure
 # into flat Spark Rows, one per polygon per source per day.
@@ -441,7 +509,6 @@ def parse_risk_rows(statement: dict, ingested_at: str) -> list:
         List of Spark Rows ready to write to fgs_risk_polygons.
     """
     rows = []
-    issued_date = date.fromisoformat(statement["issued_at"][:10])
 
     for risk_area in statement.get("risk_areas", []):
         for block in risk_area.get("risk_area_blocks", []):
@@ -451,13 +518,6 @@ def parse_risk_rows(statement: dict, ingested_at: str) -> list:
 
             # days is a sparse list -- not necessarily [1, 2, 3, 4, 5]
             for day_index in block.get("days", []):
-
-                # Derive the calendar date for this forecast day.
-                # day_index 1 = the day the FGS was issued, so subtract 1.
-                forecast_date = (
-                    issued_date + timedelta(days=day_index - 1)
-                ).isoformat()
-
                 for poly in block.get("polys", []):
 
                     # Inland risk areas are polygons, coastal ones polylines.
@@ -467,41 +527,27 @@ def parse_risk_rows(statement: dict, ingested_at: str) -> list:
                     # One row per source so risk level is always a simple
                     # integer pair, never a nested structure.
                     for source, levels in risk_levels.items():
-                        # levels is [x, y] -- impact and likelihood coordinates.
-                        if not isinstance(levels, (list, tuple)) or len(levels) < 2:
-                            print(
-                                f"WARNING: statement {statement['id']} block "
-                                f"{block.get('id')} source {source!r} has "
-                                f"unusable risk_levels {levels!r}; skipped."
-                            )
+                        f = _risk_fields(statement, risk_area, block, day_index, source, levels)
+                        if f is None:
                             continue
-                        risk_x = int(levels[0])
-                        risk_y = int(levels[1])
-
-                        # Derive human-readable labels from the matrix position.
-                        impact_label     = IMPACT_LABELS.get(risk_x, "Unknown")
-                        likelihood_label = LIKELIHOOD_LABELS.get(risk_y, "Unknown")
-                        risk_level, risk_colour = RISK_MATRIX.get(
-                            (risk_x, risk_y), ("Unknown", "Unknown")
-                        )
 
                         rows.append(Row(
                             statement_id       = int(statement["id"]),
                             issued_at          = statement["issued_at"],
-                            risk_area_id       = risk_area["id"],
-                            risk_area_block_id = block["id"],
+                            risk_area_id       = f["risk_area_id"],
+                            risk_area_block_id = f["risk_area_block_id"],
                             poly_id            = poly["id"],
-                            day_index          = day_index,
-                            forecast_date      = forecast_date,
-                            source             = source,
-                            risk_x             = risk_x,
-                            risk_y             = risk_y,
-                            impact_label       = impact_label,
-                            likelihood_label   = likelihood_label,
-                            risk_level         = risk_level,
-                            risk_colour        = risk_colour,
+                            day_index          = f["day_index"],
+                            forecast_date      = f["forecast_date"],
+                            source             = f["source"],
+                            risk_x             = f["risk_x"],
+                            risk_y             = f["risk_y"],
+                            impact_label       = f["impact_label"],
+                            likelihood_label   = f["likelihood_label"],
+                            risk_level         = f["risk_level"],
+                            risk_colour        = f["risk_colour"],
                             poly_type          = poly.get("poly_type"),
-                            beyond_five_days   = bool(risk_area.get("beyond_five_days", False)),
+                            beyond_five_days   = f["beyond_five_days"],
                             geometry_type      = geometry_type,
                             geometry           = geojson_str,
                             ingested_at        = ingested_at
@@ -510,9 +556,60 @@ def parse_risk_rows(statement: dict, ingested_at: str) -> list:
 
 
 # -----------------------------------------------------------------------------
+# parse_block_rows
+# One row per risk area block, forecast day and flood source, with no geometry.
+# This is what links the two geometry sets: a risk polygon and an AOC polygon
+# each carry a risk_area_block_id, and this table says what that block means
+# (source, day, impact, likelihood, overall risk).
+# -----------------------------------------------------------------------------
+def parse_block_rows(statement: dict, ingested_at: str) -> list:
+    """
+    Parse FGS risk area blocks into Spark Rows for fgs_risk_blocks.
+
+    Args:
+        statement:   A single statement dict from the FFC API response.
+        ingested_at: UTC timestamp string for when this record was ingested.
+
+    Returns:
+        List of Spark Rows ready to write to fgs_risk_blocks.
+    """
+    rows = []
+
+    for risk_area in statement.get("risk_areas", []):
+        for block in risk_area.get("risk_area_blocks", []):
+            risk_levels = block.get("risk_levels") or {}
+
+            for day_index in block.get("days", []):
+                for source, levels in risk_levels.items():
+                    f = _risk_fields(statement, risk_area, block, day_index, source, levels)
+                    if f is None:
+                        continue
+
+                    rows.append(Row(
+                        statement_id       = int(statement["id"]),
+                        issued_at          = statement["issued_at"],
+                        risk_area_id       = f["risk_area_id"],
+                        risk_area_block_id = f["risk_area_block_id"],
+                        day_index          = f["day_index"],
+                        forecast_date      = f["forecast_date"],
+                        source             = f["source"],
+                        risk_x             = f["risk_x"],
+                        risk_y             = f["risk_y"],
+                        impact_label       = f["impact_label"],
+                        likelihood_label   = f["likelihood_label"],
+                        risk_level         = f["risk_level"],
+                        risk_colour        = f["risk_colour"],
+                        beyond_five_days   = f["beyond_five_days"],
+                        ingested_at        = ingested_at
+                    ))
+    return rows
+
+
+# -----------------------------------------------------------------------------
 # parse_aoc_rows
 # Parses the aoc_maps polygons into flat Spark Rows for fgs_aoc_polygons.
-# AOC polygons are cartographic reference shapes with no risk attribution.
+# One row per AOC polygon. Each carries risk_area_block_id, the link to the
+# risk area block that gives it its flood source, days and risk (fgs_risk_blocks).
 # -----------------------------------------------------------------------------
 def parse_aoc_rows(statement: dict, ingested_at: str) -> list:
     """
@@ -530,15 +627,17 @@ def parse_aoc_rows(statement: dict, ingested_at: str) -> list:
     for aoc_map in statement.get("aoc_maps", []):
         for poly in aoc_map.get("polys", []):
             geojson_str, geometry_type = build_geojson_geometry(poly)
+            block_id = poly.get("risk_area_block_id")
             rows.append(Row(
-                statement_id  = int(statement["id"]),
-                issued_at     = statement["issued_at"],
-                aoc_map_id    = aoc_map["id"],
-                poly_id       = poly["id"],
-                poly_type     = poly.get("poly_type"),
-                geometry_type = geometry_type,
-                geometry      = geojson_str,
-                ingested_at   = ingested_at
+                statement_id       = int(statement["id"]),
+                issued_at          = statement["issued_at"],
+                aoc_map_id         = aoc_map["id"],
+                poly_id            = poly["id"],
+                risk_area_block_id = int(block_id) if block_id is not None else None,
+                poly_type          = poly.get("poly_type"),
+                geometry_type      = geometry_type,
+                geometry           = geojson_str,
+                ingested_at        = ingested_at
             ))
 
     return rows
@@ -570,9 +669,28 @@ def constituency_name_key(column: str) -> str:
 # IDEMPOTENT WRITES KEYED BY STATEMENT
 # =============================================================================
 
+def source_predicate(spark: SparkSession, table_name: str, source: str,
+                     alias: str = "", legacy_source: str = "risk_areas") -> str:
+    """
+    SQL condition selecting rows of one geometry source from a table that has a
+    geometry_source column. Rows written before the column existed (column
+    absent, or NULL) count as legacy_source. Returns "1 = 1" / "1 = 0" when the
+    column is absent, so the result is always a valid predicate.
+
+    Example:  f"WHERE {source_predicate(spark, TBL, 'aoc', alias='i')}"
+    """
+    prefix = f"{alias}." if alias else ""
+    if "geometry_source" in spark.table(table_name).columns:
+        return f"COALESCE({prefix}geometry_source, '{legacy_source}') = '{source}'"
+    return "1 = 1" if source == legacy_source else "1 = 0"
+
+
 def replace_statement_rows(spark: SparkSession, table_name: str,
                            statement_ids: list, rows: list,
-                           schema: StructType) -> int:
+                           schema: StructType,
+                           source_column: str = None,
+                           source_value: str = None,
+                           legacy_source: str = None) -> int:
     """
     Replace every row for the given statement ids in table_name with `rows`.
 
@@ -586,6 +704,14 @@ def replace_statement_rows(spark: SparkSession, table_name: str,
         statement_ids: Statement ids whose rows are being replaced.
         rows:          Rows (Row or dict) matching `schema`.
         schema:        Explicit schema for the write.
+        source_column: Optional column that partitions the table by geometry
+                       source (for example "geometry_source"). When given, only
+                       rows with source_column = source_value are deleted, so
+                       replacing one source never touches another.
+        source_value:  The source being written (needed with source_column).
+        legacy_source: The source that rows written before source_column existed
+                       belong to. Such rows (column absent, or NULL) count as
+                       this source.
 
     Returns:
         Number of rows written.
@@ -596,7 +722,19 @@ def replace_statement_rows(spark: SparkSession, table_name: str,
 
     if table_exists(spark, table_name):
         id_list = ", ".join(str(i) for i in ids)
-        spark.sql(f"DELETE FROM {table_name} WHERE statement_id IN ({id_list})")
+        where = f"statement_id IN ({id_list})"
+
+        if source_column is None:
+            spark.sql(f"DELETE FROM {table_name} WHERE {where}")
+        elif source_column not in spark.table(table_name).columns:
+            # Table predates the column: every existing row is the legacy source.
+            if source_value == legacy_source:
+                spark.sql(f"DELETE FROM {table_name} WHERE {where}")
+        else:
+            spark.sql(
+                f"DELETE FROM {table_name} WHERE {where} "
+                f"AND COALESCE({source_column}, '{legacy_source}') = '{source_value}'"
+            )
 
     if not rows:
         return 0
@@ -613,29 +751,34 @@ def replace_statement_rows(spark: SparkSession, table_name: str,
 
 
 def write_statements(spark: SparkSession, statements: list, ingested_at: str,
-                     tbl_statements: str, tbl_risk: str, tbl_aoc: str) -> dict:
+                     tbl_statements: str, tbl_risk: str, tbl_aoc: str,
+                     tbl_blocks: str = None) -> dict:
     """
     Parse and write FGS statements idempotently.
 
-    Child tables (risk polygons, AOC polygons) are written first and the
-    statement row last. The statement row is what the ingest job checks to
-    decide whether a statement is already stored, so a failure part way
-    through leaves the statement looking un-ingested and the next run repeats
-    it cleanly instead of skipping it with half the data missing.
+    Child tables (risk area blocks, risk polygons, AOC polygons) are written
+    first and the statement row last. The statement row is what the ingest job
+    checks to decide whether a statement is already stored, so a failure part
+    way through leaves the statement looking un-ingested and the next run
+    repeats it cleanly instead of skipping it with half the data missing.
 
     Returns:
-        Dict of counts: statements, risk_rows, aoc_rows.
+        Dict of counts: statements, risk_rows, aoc_rows, block_rows.
     """
     ids = [s["id"] for s in statements]
 
-    risk_rows, aoc_rows = [], []
+    risk_rows, aoc_rows, block_rows = [], [], []
     for s in statements:
         risk_rows.extend(parse_risk_rows(s, ingested_at))
         aoc_rows.extend(parse_aoc_rows(s, ingested_at))
+        block_rows.extend(parse_block_rows(s, ingested_at))
     stmt_rows = [parse_statement_row(s, ingested_at) for s in statements]
 
+    n_block = 0
+    if tbl_blocks:
+        n_block = replace_statement_rows(spark, tbl_blocks, ids, block_rows, BLOCK_SCHEMA)
     n_risk = replace_statement_rows(spark, tbl_risk, ids, risk_rows, RISK_SCHEMA)
     n_aoc  = replace_statement_rows(spark, tbl_aoc,  ids, aoc_rows,  AOC_SCHEMA)
     n_stmt = replace_statement_rows(spark, tbl_statements, ids, stmt_rows, STATEMENT_SCHEMA)
 
-    return {"statements": n_stmt, "risk_rows": n_risk, "aoc_rows": n_aoc}
+    return {"statements": n_stmt, "risk_rows": n_risk, "aoc_rows": n_aoc, "block_rows": n_block}

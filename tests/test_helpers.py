@@ -9,8 +9,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.helpers import (  # noqa: E402
     IMPACT_LABELS, LIKELIHOOD_LABELS, build_geojson_geometry,
-    parse_risk_rows, parse_aoc_rows, parse_statement_row, RISK_SCHEMA,
-    AOC_SCHEMA, STATEMENT_SCHEMA, to_native,
+    parse_risk_rows, parse_aoc_rows, parse_block_rows, parse_statement_row, RISK_SCHEMA,
+    AOC_SCHEMA, BLOCK_SCHEMA, STATEMENT_SCHEMA, to_native,
 )
 
 POLYGON = [[[-1.5, 53.2], [-1.3, 53.2], [-1.3, 53.4], [-1.5, 53.2]]]
@@ -33,7 +33,7 @@ def statement(polys):
                 "polys": polys,
             }],
         }],
-        "aoc_maps": [{"id": 9, "polys": [polys[0]]}],
+        "aoc_maps": [{"id": 9, "polys": [dict(polys[0], risk_area_block_id=7)]}],
     }
 
 
@@ -86,6 +86,8 @@ def test_rows_match_explicit_schemas():
         assert [f.name for f in RISK_SCHEMA.fields] == list(row.__fields__)
     for row in parse_aoc_rows(s, "now"):
         assert [f.name for f in AOC_SCHEMA.fields] == list(row.__fields__)
+    for row in parse_block_rows(s, "now"):
+        assert [f.name for f in BLOCK_SCHEMA.fields] == list(row.__fields__)
     assert [f.name for f in STATEMENT_SCHEMA.fields] == list(parse_statement_row(s, "now").__fields__)
 
 
@@ -112,3 +114,36 @@ def test_to_native_handles_pandas_values():
     assert to_native(np.int64(3)) == 3 and isinstance(to_native(np.int64(3)), int)
     assert to_native(np.bool_(True)) is True
     assert to_native("x") == "x"
+
+
+def test_block_rows_hold_the_risk_for_each_block_day_and_source():
+    polys = [{"id": 1, "type": "Polygon", "coordinates": POLYGON, "poly_type": "inland"}]
+    blocks = parse_block_rows(statement(polys), "now")
+    assert len(blocks) == 2 * 2                      # 2 days x 2 sources, no geometry, no polys
+    river = [b for b in blocks if b.source == "river" and b.day_index == 1][0]
+    assert (river.risk_area_block_id, river.risk_x, river.risk_y) == (7, 2, 3)
+    assert (river.impact_label, river.likelihood_label, river.forecast_date) == ("Moderate", "High", "2026-05-29")
+
+
+def test_block_risk_matches_risk_polygon_risk_so_the_two_can_be_linked():
+    # The same block/day/source must give the same risk in both tables
+    polys = [{"id": 1, "type": "Polygon", "coordinates": POLYGON, "poly_type": "inland"}]
+    s = statement(polys)
+    by_block = {(b.risk_area_block_id, b.day_index, b.source): (b.risk_x, b.risk_y, b.risk_colour)
+                for b in parse_block_rows(s, "now")}
+    for r in parse_risk_rows(s, "now"):
+        assert by_block[(r.risk_area_block_id, r.day_index, r.source)] == (r.risk_x, r.risk_y, r.risk_colour)
+
+
+def test_aoc_rows_keep_the_block_id_that_links_them_to_the_risk_blocks():
+    polys = [{"id": 1, "type": "Polygon", "coordinates": POLYGON, "poly_type": "inland"}]
+    aoc = parse_aoc_rows(statement(polys), "now")
+    assert [a.risk_area_block_id for a in aoc] == [7]
+    # and a block id that exists in the blocks table
+    assert 7 in {b.risk_area_block_id for b in parse_block_rows(statement(polys), "now")}
+
+
+def test_aoc_poly_without_a_block_id_is_kept_but_unlinked():
+    s = statement([{"id": 1, "type": "Polygon", "coordinates": POLYGON}])
+    s["aoc_maps"] = [{"id": 9, "polys": [{"id": 5, "type": "Polygon", "coordinates": POLYGON}]}]
+    assert parse_aoc_rows(s, "now")[0].risk_area_block_id is None

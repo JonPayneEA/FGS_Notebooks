@@ -51,6 +51,7 @@ SCHEMA  = "flood_forecasting_unrestricted"
 TBL_STATEMENTS          = f"{CATALOG}.{SCHEMA}.fgs_statements"
 TBL_RISK_POLYGONS       = f"{CATALOG}.{SCHEMA}.fgs_risk_polygons"
 TBL_AOC_POLYGONS        = f"{CATALOG}.{SCHEMA}.fgs_aoc_polygons"
+TBL_RISK_BLOCKS         = f"{CATALOG}.{SCHEMA}.fgs_risk_blocks"
 TBL_EA_FWA              = f"{CATALOG}.{SCHEMA}.ea_flood_warning_areas"
 TBL_EA_FAA              = f"{CATALOG}.{SCHEMA}.ea_flood_alert_areas"
 TBL_CONSTITUENCIES      = f"{CATALOG}.{SCHEMA}.parliamentary_constituencies"
@@ -87,6 +88,29 @@ FFC_LATEST_PATH     = "/api/public/v3/statements/latest"   # returns {"statement
 # -----------------------------------------------------------------------------
 POLL_START_HOUR = 9    # Do not poll before this hour (UTC)
 POLL_END_HOUR   = 23   # Do not poll at or after this hour (UTC)
+
+# -----------------------------------------------------------------------------
+# FGS GEOMETRY SOURCE
+# Which FGS geometries the intersections (07) and the FGS contact table (14)
+# are built from:
+#
+#   "risk_areas" -> fgs_risk_polygons  (the risk area polygons, the default)
+#   "aoc"        -> fgs_aoc_polygons   (the Area of Concern map polygons)
+#
+# Both sets are always ingested and kept. Each AOC polygon carries a
+# risk_area_block_id, and fgs_risk_blocks says what that block means (flood
+# source, forecast days, impact and likelihood), so an AOC polygon inherits its
+# risk from its block. Intersection rows are tagged with geometry_source, so
+# results for the two sources sit side by side and switching never deletes the
+# other. After changing this value, run 07_compute_intersections once with
+# recompute_all = true so the chosen source is fully computed.
+# -----------------------------------------------------------------------------
+FGS_GEOMETRY_SOURCE = "risk_areas"
+
+if FGS_GEOMETRY_SOURCE not in ("risk_areas", "aoc"):
+    raise ValueError(
+        f"FGS_GEOMETRY_SOURCE must be 'risk_areas' or 'aoc', not {FGS_GEOMETRY_SOURCE!r}"
+    )
 
 # -----------------------------------------------------------------------------
 # SPATIAL INTERSECTION THRESHOLDS

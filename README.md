@@ -46,6 +46,7 @@ folder can sit anywhere. Nothing refers to one person's workspace folder.
 3. `jobs/04_refresh_mp_details`
 4. `jobs/06_compute_lookup`
 5. `jobs/02_backfill_fgs` -- seeds the full statement history. Safe to re-run.
+   Re-run it on an existing install to add `fgs_risk_blocks` and the AOC block ids.
 6. `jobs/07_compute_intersections` with widget `recompute_all` = `true`. This
    builds `fgs_intersections_log`. Do this before scheduling the polling master,
    otherwise its first run tries to process the whole history inside a 10 minute
@@ -74,15 +75,16 @@ other, never both.
 |---|---|---|
 | `fgs_statements` | Per FGS issue or modification | One row per statement. Replaced if the statement is modified. |
 | `fgs_risk_polygons` | Per FGS issue or modification | One row per geometry per source per day. `geometry_type` is `Polygon` or `LineString` (coastal polylines). |
-| `fgs_aoc_polygons` | Per FGS issue or modification | Cartographic AOC geometries. |
+| `fgs_aoc_polygons` | Per FGS issue or modification | Area of Concern geometries, one row per polygon. Each carries `risk_area_block_id`, its link to `fgs_risk_blocks`. |
+| `fgs_risk_blocks` | Per FGS issue or modification | One row per risk area block, forecast day and flood source (impact, likelihood, risk). No geometry. The link between `fgs_risk_polygons` and `fgs_aoc_polygons`. |
 | `ea_flood_warning_areas` | Weekly | EA Flood Warning Areas. |
 | `ea_flood_alert_areas` | Weekly | EA Flood Alert Areas. |
 | `parliamentary_constituencies` | Quarterly | ONS constituency boundaries. |
 | `mp_contact_details` | Weekly | Current MPs and contact details. |
 | `ea_area_constituency_lookup` | Weekly / quarterly | Static spatial join: EA areas to constituencies (real overlaps only). |
-| `fgs_ea_area_intersections` | Per FGS issue | FGS geometries intersecting EA areas. Polygons need 25% coverage of the EA area; lines (coastal) have `intersection_pct` NULL. |
-| `fgs_constituency_intersections` | Per FGS issue | FGS geometries intersecting constituencies (any real overlap). |
-| `fgs_intersections_log` | Per FGS issue | One row per statement once intersected, with the `last_modified_at` it was computed at. |
+| `fgs_ea_area_intersections` | Per FGS issue | FGS geometries (from the source chosen in `FGS_GEOMETRY_SOURCE`, tagged `geometry_source`) intersecting EA areas. Polygons need 25% coverage of the EA area; lines (coastal) have `intersection_pct` NULL. |
+| `fgs_constituency_intersections` | Per FGS issue | FGS geometries intersecting constituencies (any real overlap), tagged `geometry_source`. |
+| `fgs_intersections_log` | Per FGS issue | One row per statement and `geometry_source` once intersected, with the `last_modified_at` it was computed at. |
 | `ea_rt_readings_bronze` | Daily | EA real-time readings, partitioned by `reading_date`. |
 | `ea_rt_measure_register` | Daily (new measures) | One row per measure, enriched from the station API. |
 | `flood_warnings_current` | Every poll | Live state of EA flood warnings and alerts. |
@@ -108,6 +110,96 @@ documentation:
 so check that table against the published guide.
 
 ---
+
+## Choosing the FGS geometry source: risk areas or AOC
+
+The FGS carries two sets of shapes. The **risk area polygons** (`fgs_risk_polygons`)
+define the spatial extent of each risk. The **Area of Concern (AOC) map polygons**
+(`fgs_aoc_polygons`) are the detailed map section of the statement. Both are always
+ingested and kept. One setting in `config.py` decides which the intersections and
+the FGS contact table are built from:
+
+```python
+FGS_GEOMETRY_SOURCE = "risk_areas"   # or "aoc"
+```
+
+### How the two link
+
+Per the FFC API v3 documentation, every AOC polygon points at a risk area block
+with `risk_area_block_id`, and that block gives the flood source, the forecast days
+and the impact and likelihood. The pipeline stores the block definitions in
+`fgs_risk_blocks`, so an AOC polygon takes its risk from its block:
+
+```mermaid
+flowchart LR
+    RISK["fgs_risk_polygons<br/>one row per polygon, day, source<br/>carries risk_area_block_id"] -->|"risk_area_block_id"| BLK
+    AOC["fgs_aoc_polygons<br/>one row per polygon<br/>carries risk_area_block_id"] -->|"risk_area_block_id"| BLK
+    BLK["fgs_risk_blocks<br/>one row per block, day, source<br/>impact, likelihood, risk"]
+```
+
+```sql
+-- Each AOC polygon with the risk it inherits from its block
+SELECT a.statement_id, a.poly_id AS aoc_poly_id, a.risk_area_block_id,
+       b.day_index, b.forecast_date, b.source, b.risk_level, b.risk_colour
+FROM prd_dash_lab.flood_forecasting_unrestricted.fgs_aoc_polygons a
+JOIN prd_dash_lab.flood_forecasting_unrestricted.fgs_risk_blocks b
+  ON  b.statement_id       = a.statement_id
+  AND b.risk_area_block_id = a.risk_area_block_id;
+```
+
+An AOC polygon appears once per day and source of its block, the same way a risk
+polygon does. This link comes from the API documentation, not from live data, so
+check it (below) before relying on `"aoc"`.
+
+### What each setting does
+
+| | `"risk_areas"` (default) | `"aoc"` |
+|---|---|---|
+| Shapes intersected | `fgs_risk_polygons` | `fgs_aoc_polygons` |
+| Flood source, day, risk from | the polygon row itself | its block in `fgs_risk_blocks` |
+| `poly_id` in the output | the risk polygon id | the AOC polygon id |
+| `geometry_source` in the output | `risk_areas` | `aoc` |
+
+Intersection rows are tagged with `geometry_source` and the log is kept per source,
+so the two sets **sit side by side in the same tables**. Recomputing one source
+replaces only that source's rows and never deletes the other. Rows written before
+the tag existed count as `risk_areas`. `fgs_constituency_mp_contacts` (job 14)
+follows the same setting.
+
+### Switching, and bringing existing data up to date
+
+1. **Once, now:** re-run `jobs/02_backfill_fgs`. It is safe to re-run. It writes
+   `fgs_risk_blocks` and adds `risk_area_block_id` to the existing AOC rows, which
+   were stored without it.
+2. Set `FGS_GEOMETRY_SOURCE` in `config.py`.
+3. Run `jobs/07_compute_intersections` with widget `recompute_all` = `true`. Do this
+   by hand; it covers the whole history for the chosen source. Then run
+   `jobs/14_fgs_constituency_contacts`.
+4. The polling master carries on with the chosen source.
+
+### Check the link before choosing AOC
+
+```sql
+-- 1. Do AOC polygons carry a block id, and do those blocks exist?
+SELECT COUNT(*)                                             AS aoc_polygons,
+       COUNT(a.risk_area_block_id)                          AS with_block_id,
+       COUNT(DISTINCT CASE WHEN b.risk_area_block_id IS NOT NULL
+                           THEN a.statement_id || '-' || a.poly_id END) AS linked_to_a_block
+FROM prd_dash_lab.flood_forecasting_unrestricted.fgs_aoc_polygons a
+LEFT JOIN (SELECT DISTINCT statement_id, risk_area_block_id
+           FROM prd_dash_lab.flood_forecasting_unrestricted.fgs_risk_blocks) b
+  ON b.statement_id = a.statement_id AND b.risk_area_block_id = a.risk_area_block_id;
+
+-- 2. Which source is each intersection table holding?
+SELECT COALESCE(geometry_source, 'risk_areas') AS geometry_source, COUNT(*)
+FROM prd_dash_lab.flood_forecasting_unrestricted.fgs_constituency_intersections
+GROUP BY 1;
+```
+
+If `with_block_id` is zero after the re-run, the API does not return
+`risk_area_block_id` on AOC polygons. AOC shapes then cannot be given a risk, and
+job 07 fails with a message saying so. Stay on `"risk_areas"` and tell me what the
+API does return.
 
 ## Order of processing
 
@@ -213,6 +305,10 @@ flowchart LR
     FFC[("FFC API v3")] -->|"01 / 02"| STM["fgs_statements"]
     FFC -->|"01 / 02"| RISK["fgs_risk_polygons"]
     FFC -->|"01 / 02"| AOC["fgs_aoc_polygons"]
+    FFC -->|"01 / 02"| BLK["fgs_risk_blocks"]
+    BLK -.->|"gives AOC its risk"| AOC
+    AOC -.->|"07, when aoc"| EAI
+    AOC -.->|"07, when aoc"| CONI
     EAG[("EA geoservices")] -->|"03"| EAA["ea_flood_warning_areas<br/>ea_flood_alert_areas"]
     ONS[("ONS")] -->|"05"| CON["parliamentary_constituencies"]
     PAR[("Parliament API")] -->|"04"| MP["mp_contact_details"]
@@ -292,6 +388,9 @@ ORDER BY forecast_date, risk_rank DESC, constituency_name;
 Notes on the table:
 
 - `risk_rank` is 1 Very Low, 2 Low, 3 Medium, 4 High, taken from `risk_level`.
+- `geometry_source` says which set of FGS shapes the rows came from (`risk_areas` or
+  `aoc`), as set by `FGS_GEOMETRY_SOURCE` in `config.py`. `poly_id` is an id in that
+  set.
 - It shows the latest statement that is fully intersected. If a newer statement
   has arrived but `07` has not finished it, the table keeps the previous complete
   one and the job output says so. `statement_id` and `issued_at` are on every row.
@@ -363,7 +462,8 @@ FROM prd_dash_lab.flood_forecasting_unrestricted.fgs_constituency_intersections 
 JOIN prd_dash_lab.flood_forecasting_unrestricted.mp_contact_details mp
   ON fi.constituency_name = mp.constituency_name      -- joined on name: the Parliament API gives no ONS code
 
-WHERE fi.statement_id = (
+WHERE COALESCE(fi.geometry_source, 'risk_areas') = 'risk_areas'   -- one geometry source, or both would be counted
+  AND fi.statement_id = (
         SELECT MAX(statement_id)
         FROM prd_dash_lab.flood_forecasting_unrestricted.fgs_statements)
   AND fi.forecast_date = CURRENT_DATE()
