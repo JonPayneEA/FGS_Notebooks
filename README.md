@@ -52,7 +52,10 @@ folder can sit anywhere. Nothing refers to one person's workspace folder.
    timeout.
 7. For EA real-time data: `jobs/08_ea_rt_archive_back`, then
    `jobs/09_ea_rt_measure_register`.
-8. Schedule the masters (see `workflows/scheduling_guide.md`).
+8. `jobs/11_flood_warnings_ingest`, then `jobs/13_warning_constituency_contacts`.
+   Step 13 needs the lookup (4), the MP table (3) and the current warnings (this
+   step), so it is last.
+9. Schedule the masters (see `workflows/scheduling_guide.md`).
 
 ### 5. Scheduling
 
@@ -82,6 +85,7 @@ other, never both.
 | `ea_rt_measure_register` | Daily (new measures) | One row per measure, enriched from the station API. |
 | `flood_warnings_current` | Every poll | Live state of EA flood warnings and alerts. |
 | `flood_warnings_log` | Every poll | Append-only log of NEW / SEVERITY_CHANGE / MESSAGE_CHANGE / CLOSED events. |
+| `flood_warning_constituency_contacts` | Every poll | Current warnings and alerts, one row per constituency each overlaps, with the sitting MP and contact details. |
 | `ea_administrative_areas` | Manual | EA and Natural England administrative boundaries. |
 
 ### Risk matrix labels
@@ -119,7 +123,9 @@ flowchart TD
     E --> F["07 compute_intersections<br/>recompute_all = true<br/>(builds fgs_intersections_log)"]
     F --> G["08 ea_rt_archive_back"]
     G --> H["09 ea_rt_measure_register"]
-    H --> I(["Schedule the four masters"])
+    H --> H2["11 flood_warnings_ingest"]
+    H2 --> H3["13 warning_constituency_contacts"]
+    H3 --> I(["Schedule the four masters"])
 ```
 
 ### Polling (Master_polling, every 30 or 60 minutes)
@@ -146,7 +152,9 @@ flowchart TD
     X2 --> S3
     W2 --> S3["Step 3: 11_flood_warnings_ingest<br/>(no window check)"]
     S3 --> W3["Append NEW, CHANGE and CLOSED events<br/>to the log, then overwrite current state<br/>Exit success or no_change"]
-    W3 --> D3{"Did any step fail?"}
+    W3 --> S4["Step 4: 13_warning_constituency_contacts<br/>(no window check)"]
+    S4 --> W4["Rebuild warnings x constituencies x MP contacts<br/>Exit success"]
+    W4 --> D3{"Did any step fail?"}
     D3 -- yes --> F(["Raise: run marked failed"])
     D3 -- no --> OK(["Exit success"])
 ```
@@ -208,14 +216,20 @@ flowchart LR
     EAA -->|"07"| EAI
     RISK -->|"07"| CONI["fgs_constituency_intersections"]
     CON -->|"07"| CONI
+    EAR[("EA flood monitoring API")] -->|"11"| CUR["flood_warnings_current"]
+    CUR -->|"13"| WC["flood_warning_constituency_contacts"]
+    LOOK -->|"13"| WC
+    MP -->|"13"| WC
     STM -->|"07"| LOG["fgs_intersections_log"]
     EAI -.->|"written before"| LOG
     CONI -.->|"written before"| LOG
 ```
 
-The EA real-time tables are separate: `10` lands `ea_rt_readings_bronze`, `09`
-builds `ea_rt_measure_register` from it, and `11` writes `flood_warnings_current`
-and `flood_warnings_log`.
+`flood_warning_constituency_contacts` is the one table that joins the three
+strands: live warnings (`11`), the spatial lookup (`06`) and the MPs (`04`). The
+other EA real-time tables are separate: `10` lands `ea_rt_readings_bronze`, `09`
+builds `ea_rt_measure_register` from it, and `11` also appends to
+`flood_warnings_log`.
 
 ### How re-runs stay safe
 
@@ -224,11 +238,51 @@ and `flood_warnings_log`.
   duplicated.
 - Child tables are written first and `fgs_statements` last, so a failure part
   way through is retried in full on the next poll.
+- `13_warning_constituency_contacts` rebuilds its table in full on every poll,
+  so it always matches the current warnings. History is in `flood_warnings_log`.
 - `07_compute_intersections` deletes a statement's rows before writing them and
   records the statement in `fgs_intersections_log` last. `recompute_all` is
   therefore safe to run as often as you like.
 
 ---
+
+## Flood warnings and alerts, by constituency and MP
+
+`flood_warning_constituency_contacts` holds the current picture. One warning that
+spans three constituencies is three rows. Every row carries the warning, the
+constituency and the MP.
+
+```sql
+-- MPs with a Flood Warning or Severe Flood Warning in force in their constituency.
+SELECT
+    mp_name, mp_party, mp_email, mp_phone,
+    constituency_name,
+    flood_area_id, flood_area_name, description,
+    severity_level, severity_label,
+    ROUND(share_of_area_in_constituency, 2) AS share_of_area_in_constituency,
+    time_severity_changed
+FROM prd_dash_lab.flood_forecasting_unrestricted.flood_warning_constituency_contacts
+WHERE is_in_force
+  AND severity_level IN (1, 2)          -- 1 Severe Flood Warning, 2 Flood Warning
+  AND mp_matched
+ORDER BY severity_level, constituency_name;
+```
+
+Notes on the table:
+
+- `is_in_force` is false for severity 4 ("Warning no Longer in Force"). Those rows
+  stay so a closing warning is still visible. Severity 3 is a Flood Alert.
+- `ea_area_type` says whether the area is a `flood_warning` or `flood_alert` area.
+- `share_of_area_in_constituency` is the share of the warning area that lies in
+  that constituency. Set `WARNING_CONTACT_MIN_PCT` in `config.py` to drop links
+  where a warning only clips the edge of a constituency, or filter on this column.
+- `mp_matched = false` marks a constituency with no matching MP: a vacancy, or a
+  name that differs between the ONS and Parliament sources. The MP is matched on
+  a normalised name (lower case, accents folded, `&` as `and`). Each run lists the
+  unmatched constituencies in the job output.
+- A warning that does not appear at all is not in `ea_area_constituency_lookup`.
+  The job lists these. If none match, the job fails, because that means the EA
+  warning codes and the area codes no longer agree.
 
 ## Typical query: which MPs need to be alerted?
 
@@ -305,6 +359,7 @@ Then run `master_quarterly` (or `06_compute_lookup` followed by
 │   ├── 09_ea_rt_measure_register      EA measure register
 │   ├── 10_ea_rt_daily_archive         Daily EA real-time archive ingest
 │   ├── 11_flood_warnings_ingest       EA flood warnings current state + log
+│   ├── 13_warning_constituency_contacts  Current warnings x constituencies x MPs
 │   └── 12_ea_area_boundaries_download EA administrative boundaries (manual)
 ├── master/                            Schedule these notebooks
 │   ├── Master_polling, Master_daily, Master_weekly, Master_quarterly

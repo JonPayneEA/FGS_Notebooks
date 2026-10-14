@@ -36,8 +36,11 @@ resources:
     #                                              failed intersection run is
     #                                              retried; it exits "no_work"
     #                                              quickly when idle)
-    #   flood_warnings                            (independent: never blocked by
-    #                                              the FGS tasks)
+    #   flood_warnings --> warning_contacts       (independent of the FGS tasks:
+    #                                              never blocked by them; contacts
+    #                                              rebuild even if the warnings
+    #                                              ingest failed, from the last
+    #                                              good current state)
     #
     # Adjust the cron to the cadence you can run (every 30 or 60 minutes).
     # -------------------------------------------------------------------------
@@ -73,6 +76,16 @@ resources:
           description: "Fetch EA flood warnings and alerts; update current state and log"
           notebook_task:
             notebook_path: "../jobs/11_flood_warnings_ingest.ipynb"
+          existing_cluster_id: ${var.cluster_id}
+          timeout_seconds: 300
+
+        - task_key: "warning_contacts"
+          description: "Rebuild current warnings x constituencies x MP contact details"
+          depends_on:
+            - task_key: "flood_warnings"
+          run_if: ALL_DONE
+          notebook_task:
+            notebook_path: "../jobs/13_warning_constituency_contacts.ipynb"
           existing_cluster_id: ${var.cluster_id}
           timeout_seconds: 300
 

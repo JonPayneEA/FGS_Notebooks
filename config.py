@@ -65,6 +65,7 @@ TBL_EA_RT_BRONZE        = f"{CATALOG}.{SCHEMA}.ea_rt_readings_bronze"
 TBL_EA_RT_REGISTER      = f"{CATALOG}.{SCHEMA}.ea_rt_measure_register"
 TBL_FLOOD_WARN_CURRENT  = f"{CATALOG}.{SCHEMA}.flood_warnings_current"
 TBL_FLOOD_WARN_LOG      = f"{CATALOG}.{SCHEMA}.flood_warnings_log"
+TBL_WARNING_CONTACTS    = f"{CATALOG}.{SCHEMA}.flood_warning_constituency_contacts"
 TBL_EA_ADMIN_AREAS      = f"{CATALOG}.{SCHEMA}.ea_administrative_areas"
 
 # -----------------------------------------------------------------------------
@@ -99,6 +100,15 @@ POLL_END_HOUR   = 23   # Do not poll at or after this hour (UTC)
 # -----------------------------------------------------------------------------
 EA_INTERSECTION_MIN_PCT = 0.25   # 25 percent minimum coverage
 MIN_OVERLAP_AREA_M2     = 1.0    # Square metres in EPSG:27700
+
+# flood_warning_constituency_contacts: a warning or alert is linked to a
+# constituency when at least this share of the warning AREA lies inside it
+# (the intersection_pct in ea_area_constituency_lookup). 0.0 keeps every real
+# overlap, matching fgs_constituency_intersections. Raise it (for example to
+# 0.05) to stop an MP being linked to a warning that only clips the edge of
+# their constituency. intersection_pct is carried in the table so you can also
+# filter at query time.
+WARNING_CONTACT_MIN_PCT = 0.0
 
 # -----------------------------------------------------------------------------
 # EA FLOOD AREA BULK GEOJSON DOWNLOADS
