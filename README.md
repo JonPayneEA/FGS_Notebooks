@@ -60,6 +60,45 @@ folder can sit anywhere. Nothing refers to one person's workspace folder.
    step), so it is last.
 10. Schedule the masters (see `workflows/scheduling_guide.md`).
 
+### Starting over on an existing install
+
+If the tables were built by an earlier version of this pipeline, the simplest and
+safest route is to rebuild the FGS-derived tables from the API. The FFC backfill
+recreates the whole statement history, so nothing is lost.
+
+**Keep** these. They cannot be recreated:
+
+- `flood_warnings_log`. The EA API only returns current state, so deleted events
+  are gone for good.
+- `ea_rt_readings_bronze`. It grows daily, and the archive only reaches back 30
+  days, so dropping it loses anything older.
+- `ea_rt_measure_register` is compatible and costs about 15 minutes of API calls to
+  rebuild, so there is no reason to drop it.
+
+**Drop** the FGS-derived tables, then clear the live warnings state (not the log):
+
+```sql
+DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.fgs_statements;
+DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.fgs_risk_polygons;
+DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.fgs_aoc_polygons;
+DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.fgs_risk_blocks;
+DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.fgs_ea_area_intersections;
+DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.fgs_constituency_intersections;
+DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.fgs_intersections_log;
+DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.fgs_constituency_mp_contacts;
+DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.flood_warning_constituency_contacts;
+DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.ea_area_constituency_lookup;
+
+-- Clear the live state so the first run does not log a CLOSED event for every
+-- stale warning left over from the old workflow. Do NOT clear flood_warnings_log.
+DELETE FROM prd_dash_lab.flood_forecasting_unrestricted.flood_warnings_current;
+```
+
+The EA areas, constituencies and MP tables are overwritten in full by their jobs, so
+they do not need dropping. Pause every old schedule first. Then follow the first-time
+run order below, skipping `08` and `09` because the bronze and register tables
+already exist. Run `Master_polling` once by hand before scheduling the masters.
+
 ### 5. Scheduling
 
 Schedule the four master notebooks with the Databricks notebook scheduler (see
