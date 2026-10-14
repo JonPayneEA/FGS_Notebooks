@@ -24,11 +24,17 @@ finds:
    ```
 
 2. **The `FFC_API_KEY` environment variable.**
-3. **A `.env` file** next to `config.py`, with a line `FFC_API_KEY=your-key`.
-   `.env` is in `.gitignore`, so it is never committed. If your existing `.env` is
-   in your Git folder, there is nothing to change. If you clone the repo into a new
-   folder, copy it across, or point `FGS_ENV_FILE` at its path. `python-dotenv` is
-   not needed.
+3. **A `.env` file** containing a line `FFC_API_KEY=your-key`. `.env` is in
+   `.gitignore`, so it is never committed. It is looked for in the first of:
+   - the path in the `FGS_ENV_FILE` environment variable, if set;
+   - next to `config.py`, inside the repo folder;
+   - **the folder above the repo folder**, outside the repo.
+
+   Put it in the folder above. A Git pull, branch switch or reset on the repo folder
+   can remove files inside it, including ignored ones, and a file in the folder above
+   is not part of the repo, so Git never touches it. If the repo is
+   `/Workspace/Users/you/fgs_pipeline`, the file goes at `/Workspace/Users/you/.env`.
+   `python-dotenv` is not needed.
 
 A `.env` file is plain text, so anyone who can open that folder can read the key. A
 secret scope is the safer home for it if your permissions allow. To request a key,

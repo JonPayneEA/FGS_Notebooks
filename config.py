@@ -15,9 +15,17 @@ import os
 #        databricks secrets create-scope fgs-pipeline
 #        databricks secrets put-secret fgs-pipeline ffc-api-key
 #   2. The FFC_API_KEY environment variable.
-#   3. A .env file next to this config.py, containing a line  FFC_API_KEY=...
-#      (.env is in .gitignore, so it is never committed). Set FGS_ENV_FILE to use
-#      a different path.
+#   3. A .env file, containing a line  FFC_API_KEY=... , found in the first of:
+#        a. the path in the FGS_ENV_FILE environment variable, if set;
+#        b. next to this config.py (inside the repo folder);
+#        c. the folder ABOVE the repo folder (outside the repo).
+#      .env is in .gitignore, so it is never committed.
+#
+#      Prefer (c). A Git pull, branch switch or reset on the repo folder can
+#      remove files inside it, including ignored ones such as .env. A file one
+#      level up is not part of the repo, so Git never touches it. Example: if the
+#      repo is /Workspace/Users/you/fgs_pipeline, put the file at
+#      /Workspace/Users/you/.env
 #
 # The key is fetched lazily, so notebooks that do not call the FFC API
 # (03 to 07, 09 to 14) never need it.
@@ -28,9 +36,17 @@ import os
 SECRET_SCOPE = "fgs-pipeline"
 SECRET_KEY   = "ffc-api-key"
 
-ENV_FILE = os.getenv("FGS_ENV_FILE") or os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), ".env"
-)
+_REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Searched in order; the first that exists and holds FFC_API_KEY wins.
+ENV_FILES = [
+    p for p in (
+        os.getenv("FGS_ENV_FILE"),                                          # explicit
+        os.path.join(_REPO_DIR, ".env"),                                    # inside the repo
+        os.path.join(os.path.dirname(_REPO_DIR), ".env"),                   # outside the repo
+    ) if p
+]
+ENV_FILE = ENV_FILES[0]   # kept for backwards compatibility
 
 
 def _read_env_file(path: str) -> dict:
@@ -72,14 +88,16 @@ def get_ffc_api_key() -> str:
     if key:
         return key
 
-    key = _read_env_file(ENV_FILE).get("FFC_API_KEY")
-    if key:
-        return key
+    for path in ENV_FILES:
+        key = _read_env_file(path).get("FFC_API_KEY")
+        if key:
+            return key
 
     raise RuntimeError(
         "FFC API key not found. Provide it as a Databricks secret "
         f"(scope '{SECRET_SCOPE}', key '{SECRET_KEY}'), the FFC_API_KEY "
-        f"environment variable, or a line FFC_API_KEY=... in {ENV_FILE}."
+        "environment variable, or a line FFC_API_KEY=... in a .env file at one of: "
+        + ", ".join(ENV_FILES)
     )
 
 
