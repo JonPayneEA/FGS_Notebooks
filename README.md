@@ -57,6 +57,12 @@ folder can sit anywhere. Nothing refers to one person's workspace folder.
 4. `jobs/06_compute_lookup`
 5. `jobs/02_backfill_fgs` -- seeds the full statement history. Safe to re-run.
    Re-run it on an existing install to add `fgs_risk_blocks` and the AOC block ids.
+   The history is large (thousands of statements, 50 per page), and a page can
+   time out. Each page is saved before the next is fetched, so nothing is lost. If
+   it fails, the output says which page to resume from: set the widget
+   `start_page` to that number (keep `page_size` the same) and run again.
+   `timeout_seconds` (default 120) can be raised for a slow page. Re-running is
+   always safe.
 6. `jobs/07_compute_intersections` with widget `recompute_all` = `true`. This
    builds `fgs_intersections_log`. Do this before scheduling the polling master,
    otherwise its first run tries to process the whole history inside a 10 minute

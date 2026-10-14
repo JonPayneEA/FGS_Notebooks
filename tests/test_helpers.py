@@ -147,3 +147,56 @@ def test_aoc_poly_without_a_block_id_is_kept_but_unlinked():
     s = statement([{"id": 1, "type": "Polygon", "coordinates": POLYGON}])
     s["aoc_maps"] = [{"id": 9, "polys": [{"id": 5, "type": "Polygon", "coordinates": POLYGON}]}]
     assert parse_aoc_rows(s, "now")[0].risk_area_block_id is None
+
+
+# ---- retries -------------------------------------------------------------------------
+def _fake_response(code, body=None):
+    import types
+    return types.SimpleNamespace(status_code=code, text="x", json=lambda: body or {})
+
+
+def test_get_with_retry_retries_timeouts_then_succeeds(monkeypatch):
+    import requests
+    from utils import helpers
+    calls = {"n": 0}
+
+    def flaky(url, headers=None, params=None, timeout=None):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise requests.ReadTimeout("slow")
+        return _fake_response(200, {"ok": True})
+
+    monkeypatch.setattr(requests, "get", flaky)
+    monkeypatch.setattr(helpers.time, "sleep", lambda s: None)
+    assert helpers.get_with_retry("http://x", timeout=7).json() == {"ok": True}
+    assert calls["n"] == 3
+
+
+def test_get_with_retry_gives_up_with_the_timeout_after_the_last_attempt(monkeypatch):
+    import requests
+    from utils import helpers
+    seen = []
+
+    def always_slow(url, headers=None, params=None, timeout=None):
+        seen.append(timeout)
+        raise requests.ReadTimeout("slow")
+
+    monkeypatch.setattr(requests, "get", always_slow)
+    monkeypatch.setattr(helpers.time, "sleep", lambda s: None)
+    with pytest.raises(requests.ReadTimeout):
+        helpers.get_with_retry("http://x", timeout=120, attempts=3)
+    assert seen == [120, 120, 120]
+
+
+def test_ffc_get_passes_its_timeout_and_attempts_through(monkeypatch):
+    import requests
+    from utils import helpers
+    seen = {}
+
+    def capture(url, headers=None, params=None, timeout=None):
+        seen.update(timeout=timeout, key=headers["X-Api-Key"])
+        return _fake_response(200, {"statements": []})
+
+    monkeypatch.setattr(requests, "get", capture)
+    assert helpers.ffc_get("http://x", "KEY", timeout=150) == {"statements": []}
+    assert seen == {"timeout": 150, "key": "KEY"}

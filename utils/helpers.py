@@ -119,7 +119,8 @@ def get_with_retry(url: str, headers: dict = None, params: dict = None,
 # All API calls should go through this function so that authentication,
 # error handling, and timeout logic are consistent across jobs.
 # -----------------------------------------------------------------------------
-def ffc_get(url: str, api_key: str, params: dict = None) -> dict:
+def ffc_get(url: str, api_key: str, params: dict = None, timeout: int = 30,
+            attempts: int = 4) -> dict:
     """
     Make an authenticated GET request to the FFC API.
 
@@ -127,6 +128,9 @@ def ffc_get(url: str, api_key: str, params: dict = None) -> dict:
         url:     Full URL to request.
         api_key: The API key (see config.get_ffc_api_key).
         params:  Optional dictionary of query string parameters.
+        timeout: Seconds to wait for a response, per attempt. Large statement
+                 pages can be slow: the backfill raises this.
+        attempts: Tries before giving up (backoff of 2, 4, 8 seconds between).
 
     Returns:
         Parsed JSON response as a Python dictionary.
@@ -140,7 +144,8 @@ def ffc_get(url: str, api_key: str, params: dict = None) -> dict:
     # The FFC public API v3 authenticates with an X-Api-Key header.
     headers = {"X-Api-Key": api_key}
 
-    response = get_with_retry(url, headers=headers, params=params, timeout=30)
+    response = get_with_retry(url, headers=headers, params=params,
+                              timeout=timeout, attempts=attempts)
 
     if response.status_code != 200:
         raise Exception(
