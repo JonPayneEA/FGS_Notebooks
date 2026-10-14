@@ -8,19 +8,58 @@ import os
 
 # -----------------------------------------------------------------------------
 # SECRETS
-# The FFC API key lives in a Databricks secret scope, never in the repo.
-#   databricks secrets create-scope fgs-pipeline
-#   databricks secrets put-secret fgs-pipeline ffc-api-key
-# For local development, set the FFC_API_KEY environment variable instead.
-# The key is fetched lazily so notebooks that do not call the FFC API
-# (03 to 07, 09 to 12) never need it.
+# The FFC API key is never stored in the repo. get_ffc_api_key() looks for it in
+# this order and uses the first it finds:
+#
+#   1. A Databricks secret (preferred, if you can create a secret scope):
+#        databricks secrets create-scope fgs-pipeline
+#        databricks secrets put-secret fgs-pipeline ffc-api-key
+#   2. The FFC_API_KEY environment variable.
+#   3. A .env file next to this config.py, containing a line  FFC_API_KEY=...
+#      (.env is in .gitignore, so it is never committed). Set FGS_ENV_FILE to use
+#      a different path.
+#
+# The key is fetched lazily, so notebooks that do not call the FFC API
+# (03 to 07, 09 to 14) never need it.
+#
+# A .env file is plain text: anyone who can open the folder can read it. A
+# secret scope is the safer home for the key if you have the permission.
 # -----------------------------------------------------------------------------
 SECRET_SCOPE = "fgs-pipeline"
 SECRET_KEY   = "ffc-api-key"
 
+ENV_FILE = os.getenv("FGS_ENV_FILE") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), ".env"
+)
+
+
+def _read_env_file(path: str) -> dict:
+    """
+    Parse a .env file into a dict. Handles comments, blank lines, an optional
+    leading "export ", spaces around "=", and single or double quotes. Returns
+    an empty dict if the file does not exist. Nothing is written to os.environ.
+    """
+    values = {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                if line.startswith("export "):
+                    line = line[len("export "):].lstrip()
+                name, _, value = line.partition("=")
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                    value = value[1:-1]
+                values[name.strip()] = value
+    except OSError:
+        return {}
+    return values
+
 
 def get_ffc_api_key() -> str:
-    """Return the FFC API key from Databricks Secrets, else the environment."""
+    """Return the FFC API key: Databricks secret, else environment, else .env."""
     try:
         from databricks.sdk.runtime import dbutils
         key = dbutils.secrets.get(scope=SECRET_SCOPE, key=SECRET_KEY)
@@ -33,9 +72,14 @@ def get_ffc_api_key() -> str:
     if key:
         return key
 
+    key = _read_env_file(ENV_FILE).get("FFC_API_KEY")
+    if key:
+        return key
+
     raise RuntimeError(
-        f"FFC API key not found. Create secret '{SECRET_KEY}' in scope "
-        f"'{SECRET_SCOPE}', or set the FFC_API_KEY environment variable."
+        "FFC API key not found. Provide it as a Databricks secret "
+        f"(scope '{SECRET_SCOPE}', key '{SECRET_KEY}'), the FFC_API_KEY "
+        f"environment variable, or a line FFC_API_KEY=... in {ENV_FILE}."
     )
 
 
