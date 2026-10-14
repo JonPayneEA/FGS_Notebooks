@@ -9,12 +9,9 @@
       "byteLimit": 2048000,
       "rowLimit": 10000
      },
-     "finishTime": 1779788508108,
      "inputWidgets": {},
      "nuid": "d5bad485-cb97-4a46-8229-c3dcae673943",
      "showTitle": false,
-     "startTime": 1779788507602,
-     "submitTime": 1779788507554,
      "tableResultSettingsMap": {},
      "title": ""
     }
@@ -64,6 +61,7 @@
     "# SETUP\n",
     "# =============================================================================\n",
     "\n",
+<<<<<<< Updated upstream
     "dbutils.widgets.text(\"start_page\", \"1\")\n",
     "dbutils.widgets.text(\"page_size\", \"50\")\n",
     "dbutils.widgets.text(\"timeout_seconds\", \"120\")\n",
@@ -78,6 +76,15 @@
     "url       = f\"{FFC_BASE_URL}{FFC_STATEMENTS_PATH}\"\n",
     "\n",
     "print(f\"start_page={START_PAGE}  page_size={PAGE_SIZE}  timeout_seconds={TIMEOUT}\")\n"
+=======
+    "spark   = get_spark()\n",
+    "# Make dbutils available when running as a .py file rather than a notebook\n",
+    "#from pyspark.dbutils import DBUtils\n",
+    "#dbutils = DBUtils(spark)\n",
+    "#api_key = FFC_API_KEY\n",
+    "now_iso = utc_now().isoformat()\n",
+    "url     = f\"{FFC_BASE_URL}{FFC_STATEMENTS_PATH}\"\n",
+    "\n"
    ]
   },
   {
@@ -89,12 +96,32 @@
       "byteLimit": 2048000,
       "rowLimit": 10000
      },
-     "finishTime": 1779789423620,
+     "inputWidgets": {},
+     "nuid": "cee9b4d8-8164-41d1-b089-b09d13c93580",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [],
+   "source": [
+    "from config import FFC_API_KEY\n",
+    "print(repr(FFC_API_KEY))"
+>>>>>>> Stashed changes
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
      "inputWidgets": {},
      "nuid": "ea8f79a8-d8cb-4fa6-b783-407f64550c94",
      "showTitle": false,
-     "startTime": 1779788522913,
-     "submitTime": 1779788522862,
      "tableResultSettingsMap": {},
      "title": ""
     }
