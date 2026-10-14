@@ -82,28 +82,16 @@ def get_ffc_api_key() -> str:
         f"environment variable, or a line FFC_API_KEY=... in {ENV_FILE}."
     )
 
-<<<<<<< Updated upstream
-=======
-# FFC API key loaded from .env -- never hard-code or commit to version control.
-FFC_API_KEY = os.getenv("FFC_API_KEY")
->>>>>>> Stashed changes
 
 # -----------------------------------------------------------------------------
 # UNITY CATALOG
 # Three-part naming: catalog.schema.table
-<<<<<<< Updated upstream
 # -----------------------------------------------------------------------------
 CATALOG = "prd_dash_lab"
 SCHEMA  = "flood_forecasting_unrestricted"
-=======
-# Change CATALOG and SCHEMA here only -- all table names update automatically.
-# -----------------------------------------------------------------------------
-CATALOG = "prd_dash_lab"
-SCHEMA  = "flood_forecasting_unrestricted"
-RESTRICTED_SCHEMA  = "flood_forecasting_restricted"
->>>>>>> Stashed changes
 
-# FGS pipeline tables (Jobs 1-7)
+# Fully qualified table names built from the above.
+# If you change CATALOG or SCHEMA, everything updates automatically.
 TBL_STATEMENTS          = f"{CATALOG}.{SCHEMA}.fgs_statements"
 TBL_RISK_POLYGONS       = f"{CATALOG}.{SCHEMA}.fgs_risk_polygons"
 TBL_AOC_POLYGONS        = f"{CATALOG}.{SCHEMA}.fgs_aoc_polygons"
@@ -126,28 +114,11 @@ TBL_WARNING_CONTACTS    = f"{CATALOG}.{SCHEMA}.flood_warning_constituency_contac
 TBL_FGS_CONTACTS        = f"{CATALOG}.{SCHEMA}.fgs_constituency_mp_contacts"
 TBL_EA_ADMIN_AREAS      = f"{CATALOG}.{SCHEMA}.ea_administrative_areas"
 
-# EA real-time pipeline tables (Jobs 8-10)
-TBL_RT_READINGS_BRONZE  = f"{CATALOG}.{SCHEMA}.ea_rt_readings_bronze"
-TBL_MEASURE_REGISTER    = f"{CATALOG}.{SCHEMA}.ea_rt_measure_register"
-
-# Flood warnings tables (Job 11)
-TBL_FLOOD_WARNINGS_CURRENT = f"{CATALOG}.{SCHEMA}.flood_warnings_current"
-TBL_FLOOD_WARNINGS_LOG     = f"{CATALOG}.{SCHEMA}.flood_warnings_log"
-
-# Administrative boundaries (Job 12)
-TBL_ADMIN_AREAS         = f"{CATALOG}.{SCHEMA}.ea_administrative_areas"
-
-# WISKI lookup (Job 13)
-TBL_WISKI_LOOKUP        = f"{CATALOG}.{SCHEMA}.ea_rt_wiski_lookup"
-
 # -----------------------------------------------------------------------------
 # FFC API
-<<<<<<< Updated upstream
 # Base URL and paths for the Flood Forecasting Centre public API v3.
 # V1 and V2 were decommissioned on 01/07/2026. Authentication is an
 # X-Api-Key header. Statements list: page_number / page_size (default 50).
-=======
->>>>>>> Stashed changes
 # -----------------------------------------------------------------------------
 FFC_BASE_URL        = "https://api.ffc-environment-agency.fgs.metoffice.gov.uk"
 FFC_STATEMENTS_PATH = "/api/public/v3/statements"
@@ -155,7 +126,6 @@ FFC_LATEST_PATH     = "/api/public/v3/statements/latest"   # returns {"statement
 
 # -----------------------------------------------------------------------------
 # POLLING WINDOW
-<<<<<<< Updated upstream
 # The FGS is issued from 10:30. Padding extra hours either side.
 # The ingest notebook exits cleanly outside this window.
 # Times are UTC.
@@ -250,10 +220,3 @@ MIN_CONSTITUENCIES = 600   # A refresh returning fewer than this is rejected
 # -----------------------------------------------------------------------------
 PARLIAMENT_API_BASE = "https://members-api.parliament.uk/api"
 MIN_MPS             = 600    # A refresh returning fewer than this is rejected
-=======
-# The FGS is issued between 10:00 and 22:00 UTC.
-# The polling job runs hourly; cadence enforced by the DASH scheduler.
-# -----------------------------------------------------------------------------
-POLL_START_HOUR = 9
-POLL_END_HOUR = 23
->>>>>>> Stashed changes
