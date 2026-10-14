@@ -90,6 +90,10 @@ def get_ffc_api_key() -> str:
 CATALOG = "prd_dash_lab"
 SCHEMA  = "flood_forecasting_unrestricted"
 
+# Restricted schema, for data that must not sit alongside the unrestricted tables
+# (the flood thresholds). Nothing in the FGS pipeline reads from it.
+RESTRICTED_SCHEMA = "flood_forecasting_restricted"
+
 # Fully qualified table names built from the above.
 # If you change CATALOG or SCHEMA, everything updates automatically.
 TBL_STATEMENTS          = f"{CATALOG}.{SCHEMA}.fgs_statements"
@@ -105,7 +109,7 @@ TBL_FGS_EA_INTERSECT    = f"{CATALOG}.{SCHEMA}.fgs_ea_area_intersections"
 TBL_FGS_CONST_INTERSECT = f"{CATALOG}.{SCHEMA}.fgs_constituency_intersections"
 TBL_FGS_INTERSECT_LOG   = f"{CATALOG}.{SCHEMA}.fgs_intersections_log"
 
-# EA real-time data (jobs 08 to 12)
+# EA real-time data (jobs 08 to 12, and the manual notebooks 15 to 17)
 TBL_EA_RT_BRONZE        = f"{CATALOG}.{SCHEMA}.ea_rt_readings_bronze"
 TBL_EA_RT_REGISTER      = f"{CATALOG}.{SCHEMA}.ea_rt_measure_register"
 TBL_FLOOD_WARN_CURRENT  = f"{CATALOG}.{SCHEMA}.flood_warnings_current"
@@ -113,6 +117,15 @@ TBL_FLOOD_WARN_LOG      = f"{CATALOG}.{SCHEMA}.flood_warnings_log"
 TBL_WARNING_CONTACTS    = f"{CATALOG}.{SCHEMA}.flood_warning_constituency_contacts"
 TBL_FGS_CONTACTS        = f"{CATALOG}.{SCHEMA}.fgs_constituency_mp_contacts"
 TBL_EA_ADMIN_AREAS      = f"{CATALOG}.{SCHEMA}.ea_administrative_areas"
+TBL_EA_RT_STATIONS      = f"{CATALOG}.{SCHEMA}.ea_rt_stations"
+TBL_EA_RT_STATION_MEASURES = f"{CATALOG}.{SCHEMA}.ea_rt_station_measures"
+TBL_WISKI_LOOKUP        = f"{CATALOG}.{SCHEMA}.ea_rt_wiski_lookup"
+TBL_EA_THRESHOLDS       = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_thresholds_all"
+
+# Externally supplied CSVs, read from Unity Catalog volumes by notebooks 16 and 17.
+EXTERNAL_VOLUME  = "shared_external_volume"
+WISKI_LOOKUP_CSV = f"/Volumes/{CATALOG}/{SCHEMA}/{EXTERNAL_VOLUME}/realTime_WISKI_lookup.csv"
+THRESHOLDS_CSV   = f"/Volumes/{CATALOG}/{RESTRICTED_SCHEMA}/{EXTERNAL_VOLUME}/thresholds_Feb.csv"
 
 # -----------------------------------------------------------------------------
 # FFC API
