@@ -147,6 +147,10 @@ other, never both.
 | `fgs_constituency_mp_contacts` | Every poll | The latest complete FGS forecast (proactive): one row per geometry, day, source and constituency, with the sitting MP and contact details. |
 | `flood_warning_constituency_contacts` | Every poll | Current warnings and alerts, one row per constituency each overlaps, with the sitting MP and contact details. |
 | `ea_administrative_areas` | Manual | EA and Natural England administrative boundaries. |
+| `ea_rt_stations` | Manual (15) | Every EA real-time station, one row per station, from the stations API. |
+| `ea_rt_station_measures` | Manual (15) | One row per measure, keyed by `stationReference`. |
+| `ea_rt_wiski_lookup` | Manual (16) | Measures matched to WISKI ids from the externally supplied lookup CSV. |
+| `ea_thresholds_all` | Manual (17) | Flood thresholds from the restricted volume. Lives in the restricted schema, `flood_forecasting_restricted`. |
 
 ### Risk matrix labels
 
@@ -576,7 +580,10 @@ Then run `master_quarterly` (or `06_compute_lookup` followed by
 │   ├── 11_flood_warnings_ingest       EA flood warnings current state + log
 │   ├── 13_warning_constituency_contacts  Current warnings x constituencies x MPs
 │   ├── 14_fgs_constituency_contacts   Latest FGS forecast x constituencies x MPs
-│   └── 12_ea_area_boundaries_download EA administrative boundaries (manual)
+│   ├── 12_ea_area_boundaries_download EA administrative boundaries (manual)
+│   ├── 15_rt_station_measure_register All EA stations and measures (manual)
+│   ├── 16_build_wiski_lookup          Measures x WISKI ids from an external CSV (manual)
+│   └── 17_build_thresholds_table      Flood thresholds into the restricted schema (manual)
 ├── master/                            Schedule these notebooks
 │   ├── Master_polling, Master_daily, Master_weekly, Master_quarterly
 ├── tests/                             pytest suite for the parsing and spatial helpers
@@ -584,6 +591,29 @@ Then run `master_quarterly` (or `06_compute_lookup` followed by
     ├── databricks_workflows.yml       Workflow definitions (optional)
     └── scheduling_guide.md            Notebook scheduler instructions
 ```
+
+## Manual reference notebooks (15 to 17)
+
+These three are run by hand when their source changes. No master or workflow calls
+them, and the FGS pipeline does not depend on them. Their paths and table names
+live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
+`TBL_WISKI_LOOKUP`, `TBL_EA_THRESHOLDS`, `WISKI_LOOKUP_CSV`, `THRESHOLDS_CSV`).
+
+- **15** fetches every station in one bulk call. Job `09` makes about 3,000
+  separate station calls for similar information, so it could read `ea_rt_stations`
+  instead. That is not wired up.
+- **16** joins `ea_rt_measure_register` to the WISKI CSV on station only. A station
+  has several measures, and the lookup may have a row per parameter, so a measure
+  can pick up another parameter's WISKI id. The notebook prints a warning when the
+  matched rows exceed the distinct measures. Check after each run:
+
+  ```sql
+  SELECT COUNT(*) AS total_rows, COUNT(DISTINCT measure_uri) AS distinct_measures
+  FROM prd_dash_lab.flood_forecasting_unrestricted.ea_rt_wiski_lookup;
+  ```
+
+- **17** loads the thresholds CSV into the restricted schema. Keep it out of joins
+  with unrestricted outputs.
 
 ## Tests
 
