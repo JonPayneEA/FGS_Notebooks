@@ -38,8 +38,9 @@
 #
 # Each step is isolated: a failure in the FGS ingest does not stop the flood
 # warnings ingest. The run still fails at the end so the alert fires.
-# The last step rebuilds flood_warning_constituency_contacts (current warnings
-# and alerts x constituencies x MP contact details).
+# Two steps rebuild contact tables: fgs_constituency_mp_contacts (the latest FGS
+# forecast, proactive) after the intersections, and flood_warning_constituency_contacts
+# (current EA warnings and alerts, reactive) at the end.
 #
 # This is the most important schedule. Missing a run during a flood event
 # means missing a potential FGS update. Set a failure alert.
@@ -89,8 +90,8 @@
 # If a notebook times out, either increase the timeout in the master notebook
 # or run the failing job notebook manually to diagnose.
 #
-# master_polling:    total ~25 min  (ingest 5min + intersections 10min + warnings 5min +
-#                                    warning contacts 5min)
+# master_polling:    total ~30 min  (ingest 5min + intersections 10min + FGS contacts 5min +
+#                                    warnings 5min + warning contacts 5min)
 # master_weekly:     total ~3 hrs   (EA 10min + MPs 30min + lookup 10min +
 #                                    intersections 2hrs for full history)
 # master_quarterly:  total ~3 hrs   (boundaries 10min + lookup 10min +

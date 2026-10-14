@@ -52,10 +52,12 @@ folder can sit anywhere. Nothing refers to one person's workspace folder.
    timeout.
 7. For EA real-time data: `jobs/08_ea_rt_archive_back`, then
    `jobs/09_ea_rt_measure_register`.
-8. `jobs/11_flood_warnings_ingest`, then `jobs/13_warning_constituency_contacts`.
+8. `jobs/14_fgs_constituency_contacts`. It needs the intersections (6) and the MP
+   table (3).
+9. `jobs/11_flood_warnings_ingest`, then `jobs/13_warning_constituency_contacts`.
    Step 13 needs the lookup (4), the MP table (3) and the current warnings (this
    step), so it is last.
-9. Schedule the masters (see `workflows/scheduling_guide.md`).
+10. Schedule the masters (see `workflows/scheduling_guide.md`).
 
 ### 5. Scheduling
 
@@ -85,6 +87,7 @@ other, never both.
 | `ea_rt_measure_register` | Daily (new measures) | One row per measure, enriched from the station API. |
 | `flood_warnings_current` | Every poll | Live state of EA flood warnings and alerts. |
 | `flood_warnings_log` | Every poll | Append-only log of NEW / SEVERITY_CHANGE / MESSAGE_CHANGE / CLOSED events. |
+| `fgs_constituency_mp_contacts` | Every poll | The latest complete FGS forecast (proactive): one row per geometry, day, source and constituency, with the sitting MP and contact details. |
 | `flood_warning_constituency_contacts` | Every poll | Current warnings and alerts, one row per constituency each overlaps, with the sitting MP and contact details. |
 | `ea_administrative_areas` | Manual | EA and Natural England administrative boundaries. |
 
@@ -121,7 +124,8 @@ flowchart TD
     C --> D["06 compute_lookup"]
     D --> E["02 backfill_fgs<br/>(safe to re-run)"]
     E --> F["07 compute_intersections<br/>recompute_all = true<br/>(builds fgs_intersections_log)"]
-    F --> G["08 ea_rt_archive_back"]
+    F --> F2["14 fgs_constituency_contacts"]
+    F2 --> G["08 ea_rt_archive_back"]
     G --> H["09 ea_rt_measure_register"]
     H --> H2["11 flood_warnings_ingest"]
     H2 --> H3["13 warning_constituency_contacts"]
@@ -150,11 +154,13 @@ flowchart TD
     D2 -- no --> X2["Exit no_work<br/>(nothing to compute)"]
     D2 -- yes --> W2["Per statement: delete and rewrite<br/>EA and constituency rows,<br/>then write the log row<br/>Exit success"]
     X2 --> S3
-    W2 --> S3["Step 3: 11_flood_warnings_ingest<br/>(no window check)"]
-    S3 --> W3["Append NEW, CHANGE and CLOSED events<br/>to the log, then overwrite current state<br/>Exit success or no_change"]
-    W3 --> S4["Step 4: 13_warning_constituency_contacts<br/>(no window check)"]
-    S4 --> W4["Rebuild warnings x constituencies x MP contacts<br/>Exit success"]
-    W4 --> D3{"Did any step fail?"}
+    W2 --> S3["Step 3: 14_fgs_constituency_contacts<br/>(proactive)"]
+    S3 --> W3["Rebuild the latest complete forecast<br/>x constituencies x MP contacts<br/>Exit success"]
+    W3 --> S4["Step 4: 11_flood_warnings_ingest<br/>(no window check)"]
+    S4 --> W4["Append NEW, CHANGE and CLOSED events<br/>to the log, then overwrite current state<br/>Exit success or no_change"]
+    W4 --> S5["Step 5: 13_warning_constituency_contacts<br/>(reactive, no window check)"]
+    S5 --> W5["Rebuild warnings x constituencies x MP contacts<br/>Exit success"]
+    W5 --> D3{"Did any step fail?"}
     D3 -- yes --> F(["Raise: run marked failed"])
     D3 -- no --> OK(["Exit success"])
 ```
@@ -217,6 +223,8 @@ flowchart LR
     RISK -->|"07"| CONI["fgs_constituency_intersections"]
     CON -->|"07"| CONI
     EAR[("EA flood monitoring API")] -->|"11"| CUR["flood_warnings_current"]
+    CONI -->|"14"| FC["fgs_constituency_mp_contacts"]
+    MP -->|"14"| FC
     CUR -->|"13"| WC["flood_warning_constituency_contacts"]
     LOOK -->|"13"| WC
     MP -->|"13"| WC
@@ -225,8 +233,12 @@ flowchart LR
     CONI -.->|"written before"| LOG
 ```
 
-`flood_warning_constituency_contacts` is the one table that joins the three
-strands: live warnings (`11`), the spatial lookup (`06`) and the MPs (`04`). The
+There are two contact tables, one for each way of looking at flood risk.
+`fgs_constituency_mp_contacts` is proactive: it starts from the forecast (the
+FGS), so an MP can be told before any warning exists.
+`flood_warning_constituency_contacts` is reactive: it starts from warnings the EA
+has already issued (`11`), through the spatial lookup (`06`). Both end at the
+sitting MP (`04`). The
 other EA real-time tables are separate: `10` lands `ea_rt_readings_bronze`, `09`
 builds `ea_rt_measure_register` from it, and `11` also appends to
 `flood_warnings_log`.
@@ -238,15 +250,61 @@ builds `ea_rt_measure_register` from it, and `11` also appends to
   duplicated.
 - Child tables are written first and `fgs_statements` last, so a failure part
   way through is retried in full on the next poll.
-- `13_warning_constituency_contacts` rebuilds its table in full on every poll,
-  so it always matches the current warnings. History is in `flood_warnings_log`.
+- `14_fgs_constituency_contacts` and `13_warning_constituency_contacts` rebuild
+  their tables in full on every poll, so each always matches the current forecast
+  or the current warnings. History is in the FGS tables and `flood_warnings_log`.
 - `07_compute_intersections` deletes a statement's rows before writing them and
   records the statement in `fgs_intersections_log` last. `recompute_all` is
   therefore safe to run as often as you like.
 
 ---
 
-## Flood warnings and alerts, by constituency and MP
+## The forecast (FGS), by constituency and MP: proactive
+
+`fgs_constituency_mp_contacts` holds the latest statement whose intersections are
+complete. It is the forecast for the next five days, so it shows where flooding is
+possible before any warning is issued. The grain is one row per FGS geometry,
+forecast day, flood source and constituency, so a constituency usually has several
+rows a day. Rank them to get the worst risk.
+
+```sql
+-- MPs whose constituency has an Amber or Red risk in the forecast, worst risk per
+-- constituency, day and source.
+WITH ranked AS (
+    SELECT *,
+           ROW_NUMBER() OVER (
+               PARTITION BY constituency_id, forecast_date, source
+               ORDER BY risk_rank DESC, risk_x DESC, risk_y DESC
+           ) AS rn
+    FROM prd_dash_lab.flood_forecasting_unrestricted.fgs_constituency_mp_contacts
+)
+SELECT
+    forecast_date, constituency_name, source,
+    risk_level, risk_colour, impact_label, likelihood_label,
+    mp_name, mp_party, mp_email, mp_phone
+FROM ranked
+WHERE rn = 1
+  AND risk_rank >= 3                    -- 3 Medium (Amber), 4 High (Red)
+  AND mp_matched
+ORDER BY forecast_date, risk_rank DESC, constituency_name;
+```
+
+Notes on the table:
+
+- `risk_rank` is 1 Very Low, 2 Low, 3 Medium, 4 High, taken from `risk_level`.
+- It shows the latest statement that is fully intersected. If a newer statement
+  has arrived but `07` has not finished it, the table keeps the previous complete
+  one and the job output says so. `statement_id` and `issued_at` are on every row.
+- `share_of_constituency_covered` is the share of the constituency the FGS
+  geometry covers. Links below 1% are not written (`FGS_CONTACT_MIN_PCT` in
+  `config.py`). Coastal polylines have no area, so this is NULL and they are
+  always kept.
+- `mp_matched = false` marks a constituency with no matching MP. The job lists
+  them, and fails if no constituency matches any MP.
+- Like the reactive table, it is the current picture, not history: MP details are
+  overwritten weekly, so old forecasts are not re-stamped with today's MP.
+
+## Flood warnings and alerts, by constituency and MP: reactive
 
 `flood_warning_constituency_contacts` holds the current picture. One warning that
 spans three constituencies is three rows. Every row carries the warning, the
@@ -362,6 +420,7 @@ Then run `master_quarterly` (or `06_compute_lookup` followed by
 │   ├── 10_ea_rt_daily_archive         Daily EA real-time archive ingest
 │   ├── 11_flood_warnings_ingest       EA flood warnings current state + log
 │   ├── 13_warning_constituency_contacts  Current warnings x constituencies x MPs
+│   ├── 14_fgs_constituency_contacts   Latest FGS forecast x constituencies x MPs
 │   └── 12_ea_area_boundaries_download EA administrative boundaries (manual)
 ├── master/                            Schedule these notebooks
 │   ├── Master_polling, Master_daily, Master_weekly, Master_quarterly

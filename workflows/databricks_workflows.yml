@@ -31,7 +31,8 @@ resources:
     # The ingest notebook checks the polling window itself (config.py, UTC) and
     # exits cleanly outside it, so the schedule can fire all day.
     #
-    #   ingest_fgs --> compute_intersections      (runs even if ingest found
+    #   ingest_fgs --> compute_intersections --> fgs_contacts
+    #                                             (runs even if ingest found
     #                                              nothing new, or failed, so a
     #                                              failed intersection run is
     #                                              retried; it exits "no_work"
@@ -71,6 +72,16 @@ resources:
               recompute_all: "false"
           existing_cluster_id: ${var.cluster_id}
           timeout_seconds: 600
+
+        - task_key: "fgs_contacts"
+          description: "Rebuild the latest FGS forecast x constituencies x MP contact details"
+          depends_on:
+            - task_key: "compute_intersections"
+          run_if: ALL_DONE
+          notebook_task:
+            notebook_path: "../jobs/14_fgs_constituency_contacts.ipynb"
+          existing_cluster_id: ${var.cluster_id}
+          timeout_seconds: 300
 
         - task_key: "flood_warnings"
           description: "Fetch EA flood warnings and alerts; update current state and log"

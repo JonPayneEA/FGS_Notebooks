@@ -66,6 +66,7 @@ TBL_EA_RT_REGISTER      = f"{CATALOG}.{SCHEMA}.ea_rt_measure_register"
 TBL_FLOOD_WARN_CURRENT  = f"{CATALOG}.{SCHEMA}.flood_warnings_current"
 TBL_FLOOD_WARN_LOG      = f"{CATALOG}.{SCHEMA}.flood_warnings_log"
 TBL_WARNING_CONTACTS    = f"{CATALOG}.{SCHEMA}.flood_warning_constituency_contacts"
+TBL_FGS_CONTACTS        = f"{CATALOG}.{SCHEMA}.fgs_constituency_mp_contacts"
 TBL_EA_ADMIN_AREAS      = f"{CATALOG}.{SCHEMA}.ea_administrative_areas"
 
 # -----------------------------------------------------------------------------
@@ -109,6 +110,11 @@ MIN_OVERLAP_AREA_M2     = 1.0    # Square metres in EPSG:27700
 # fgs_constituency_intersections. share_of_area_in_constituency is carried in
 # the table, so you can also filter harder at query time.
 WARNING_CONTACT_MIN_PCT = 0.01
+
+# fgs_constituency_mp_contacts: the same idea for the forecast (FGS). A polygon
+# is linked to a constituency when it covers at least this share of the
+# CONSTITUENCY. Coastal polylines have no area, so they are always kept.
+FGS_CONTACT_MIN_PCT = 0.01
 
 # -----------------------------------------------------------------------------
 # EA FLOOD AREA BULK GEOJSON DOWNLOADS
