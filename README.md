@@ -639,13 +639,24 @@ your alerts fire.
 
 ### Dashboard
 
-A Databricks AI/BI dashboard needs no new tables. Build the datasets from these
-queries: the situation query above (a table with conditional formatting on
-`fgs_worst_rank`), the escalation query (a short "what changed" list), the
-exposure query (a bar chart), and `SELECT * FROM pipeline_health` (a status
-panel). For a map, join `constituency_flood_situation` to
-`parliamentary_constituencies` on `constituency_id` and use the `geometry` column.
-The dashboard object itself is not in this repository.
+`dashboards/fgs_flood_situation.lvdash.json` is a Databricks AI/BI (Lakeview)
+dashboard: three headline counters (constituencies at Medium or above, escalated
+since the previous statement, with a warning or alert in force), the constituencies
+to watch, the latest escalations, a bar chart of the most exposed constituencies
+over 12 months, and the pipeline health checks.
+
+To use it, upload the file to your workspace (Workspace, then Import) and open it,
+then pick a SQL warehouse. The table names in its queries are the ones in
+`config.py` (`CATALOG`, `SCHEMA`) as they stand today. If you change those, edit
+the five dataset queries in the file.
+
+**Untested on Databricks.** The five queries were run against a local Spark and
+return the columns the widgets use. The widget layout is written to the Lakeview
+file format from memory and has not been imported into a workspace. If the import
+fails or a widget looks wrong, the datasets are the valuable part: each is a
+plain query you can paste into a new dashboard. A map is not included. To add one,
+join `constituency_flood_situation` to `parliamentary_constituencies` on
+`constituency_id` and use the `geometry` column.
 
 ## Typical query: which MPs need to be alerted?
 
@@ -736,6 +747,8 @@ Then run `master_quarterly` (or `06_compute_lookup` followed by
 │   └── 17_build_thresholds_table      Flood thresholds into the restricted schema (manual)
 ├── master/                            Schedule these notebooks
 │   ├── Master_polling, Master_daily, Master_weekly, Master_quarterly
+├── dashboards/
+│   └── fgs_flood_situation.lvdash.json  AI/BI dashboard (untested import)
 ├── tests/                             pytest suite for the parsing and spatial helpers
 └── workflows/
     ├── databricks_workflows.yml       Workflow definitions (optional)
