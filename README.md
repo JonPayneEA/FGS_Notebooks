@@ -9,6 +9,14 @@ constituencies. It also lands EA real-time flood warnings and river readings.
 
 ## Before you start
 
+### 0. Python packages (serverless and classic compute)
+
+Notebooks 03, 05, 06, 07 and 12 need `geopandas`. Serverless compute does not
+ship it, so each of those notebooks starts with a `%pip install -q geopandas`
+cell. Run the notebook from the top (Run all) so that cell executes first. It
+restarts Python, which is why it must come before the widgets and imports. On a
+classic cluster with geopandas already installed the cell is a quick no-op.
+
 ### 1. Provide the FFC API key
 
 `config.get_ffc_api_key()` looks for the key in this order and uses the first it
