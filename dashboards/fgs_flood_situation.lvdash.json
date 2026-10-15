@@ -1,0 +1,513 @@
+{
+  "datasets": [
+    {
+      "name": "kpi",
+      "displayName": "Headline numbers",
+      "queryLines": [
+        "SELECT\n",
+        "  (SELECT COUNT(*) FROM prd_dash_lab.flood_forecasting_unrestricted.constituency_flood_situation WHERE fgs_worst_rank >= 3) AS at_risk_medium_or_above,\n",
+        "  (SELECT COUNT(*) FROM prd_dash_lab.flood_forecasting_unrestricted.constituency_flood_situation WHERE fgs_escalated) AS escalated,\n",
+        "  (SELECT COUNT(*) FROM prd_dash_lab.flood_forecasting_unrestricted.constituency_flood_situation WHERE has_active_warning) AS with_warning_or_alert\n"
+      ]
+    },
+    {
+      "name": "situation",
+      "displayName": "Constituencies to watch",
+      "queryLines": [
+        "SELECT constituency_name, mp_name, mp_party, fgs_worst_level, fgs_worst_rank, fgs_worst_date,\n",
+        "       fgs_worst_sources, fgs_escalated, severe_warnings, warnings, alerts\n",
+        "FROM prd_dash_lab.flood_forecasting_unrestricted.constituency_flood_situation\n",
+        "WHERE fgs_worst_rank >= 2 OR has_active_warning\n",
+        "ORDER BY fgs_worst_rank DESC, severe_warnings DESC, warnings DESC, constituency_name\n"
+      ]
+    },
+    {
+      "name": "changes",
+      "displayName": "Escalations in the latest statement",
+      "queryLines": [
+        "SELECT constituency_name, forecast_date, source, previous_rank, new_rank, change_type\n",
+        "FROM prd_dash_lab.flood_forecasting_unrestricted.fgs_constituency_changes\n",
+        "WHERE statement_id = (SELECT MAX(statement_id) FROM prd_dash_lab.flood_forecasting_unrestricted.fgs_constituency_changes)\n",
+        "  AND change_type IN ('escalated', 'new')\n",
+        "ORDER BY new_rank DESC, constituency_name\n"
+      ]
+    },
+    {
+      "name": "exposure",
+      "displayName": "Most exposed constituencies, last 12 months",
+      "queryLines": [
+        "SELECT constituency_name, SUM(days_medium_or_above) AS days_medium_or_above\n",
+        "FROM prd_dash_lab.flood_forecasting_unrestricted.fgs_constituency_exposure\n",
+        "WHERE source = 'any' AND month >= date_format(add_months(current_date(), -12), 'yyyy-MM')\n",
+        "GROUP BY constituency_name\n",
+        "ORDER BY days_medium_or_above DESC\n",
+        "LIMIT 20\n"
+      ]
+    },
+    {
+      "name": "health",
+      "displayName": "Pipeline health",
+      "queryLines": [
+        "SELECT check_name, status, value, detail, checked_at\n",
+        "FROM prd_dash_lab.flood_forecasting_unrestricted.pipeline_health\n",
+        "ORDER BY CASE status WHEN 'fail' THEN 0 WHEN 'warn' THEN 1 WHEN 'info' THEN 2 ELSE 3 END, check_name\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "overview",
+      "displayName": "Flood situation",
+      "layout": [
+        {
+          "widget": {
+            "name": "kpi_risk",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi",
+                  "fields": [
+                    {
+                      "name": "at_risk_medium_or_above",
+                      "expression": "`at_risk_medium_or_above`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "at_risk_medium_or_above",
+                  "displayName": "at risk medium or above"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Constituencies at Medium or above"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_escalated",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi",
+                  "fields": [
+                    {
+                      "name": "escalated",
+                      "expression": "`escalated`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "escalated",
+                  "displayName": "escalated"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Escalated since previous statement"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_warn",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi",
+                  "fields": [
+                    {
+                      "name": "with_warning_or_alert",
+                      "expression": "`with_warning_or_alert`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "with_warning_or_alert",
+                  "displayName": "with warning or alert"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "With a warning or alert in force"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "situation_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "situation",
+                  "fields": [
+                    {
+                      "name": "constituency_name",
+                      "expression": "`constituency_name`"
+                    },
+                    {
+                      "name": "mp_name",
+                      "expression": "`mp_name`"
+                    },
+                    {
+                      "name": "mp_party",
+                      "expression": "`mp_party`"
+                    },
+                    {
+                      "name": "fgs_worst_level",
+                      "expression": "`fgs_worst_level`"
+                    },
+                    {
+                      "name": "fgs_worst_date",
+                      "expression": "`fgs_worst_date`"
+                    },
+                    {
+                      "name": "fgs_worst_sources",
+                      "expression": "`fgs_worst_sources`"
+                    },
+                    {
+                      "name": "fgs_escalated",
+                      "expression": "`fgs_escalated`"
+                    },
+                    {
+                      "name": "severe_warnings",
+                      "expression": "`severe_warnings`"
+                    },
+                    {
+                      "name": "warnings",
+                      "expression": "`warnings`"
+                    },
+                    {
+                      "name": "alerts",
+                      "expression": "`alerts`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "constituency_name",
+                    "displayName": "constituency name"
+                  },
+                  {
+                    "fieldName": "mp_name",
+                    "displayName": "mp name"
+                  },
+                  {
+                    "fieldName": "mp_party",
+                    "displayName": "mp party"
+                  },
+                  {
+                    "fieldName": "fgs_worst_level",
+                    "displayName": "fgs worst level"
+                  },
+                  {
+                    "fieldName": "fgs_worst_date",
+                    "displayName": "fgs worst date"
+                  },
+                  {
+                    "fieldName": "fgs_worst_sources",
+                    "displayName": "fgs worst sources"
+                  },
+                  {
+                    "fieldName": "fgs_escalated",
+                    "displayName": "fgs escalated"
+                  },
+                  {
+                    "fieldName": "severe_warnings",
+                    "displayName": "severe warnings"
+                  },
+                  {
+                    "fieldName": "warnings",
+                    "displayName": "warnings"
+                  },
+                  {
+                    "fieldName": "alerts",
+                    "displayName": "alerts"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Constituencies to watch"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "changes_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "changes",
+                  "fields": [
+                    {
+                      "name": "constituency_name",
+                      "expression": "`constituency_name`"
+                    },
+                    {
+                      "name": "forecast_date",
+                      "expression": "`forecast_date`"
+                    },
+                    {
+                      "name": "source",
+                      "expression": "`source`"
+                    },
+                    {
+                      "name": "previous_rank",
+                      "expression": "`previous_rank`"
+                    },
+                    {
+                      "name": "new_rank",
+                      "expression": "`new_rank`"
+                    },
+                    {
+                      "name": "change_type",
+                      "expression": "`change_type`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "constituency_name",
+                    "displayName": "constituency name"
+                  },
+                  {
+                    "fieldName": "forecast_date",
+                    "displayName": "forecast date"
+                  },
+                  {
+                    "fieldName": "source",
+                    "displayName": "source"
+                  },
+                  {
+                    "fieldName": "previous_rank",
+                    "displayName": "previous rank"
+                  },
+                  {
+                    "fieldName": "new_rank",
+                    "displayName": "new rank"
+                  },
+                  {
+                    "fieldName": "change_type",
+                    "displayName": "change type"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Escalations in the latest statement"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "exposure_chart",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "exposure",
+                  "fields": [
+                    {
+                      "name": "constituency_name",
+                      "expression": "`constituency_name`"
+                    },
+                    {
+                      "name": "days_medium_or_above",
+                      "expression": "`days_medium_or_above`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "days_medium_or_above",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Days at Medium or above"
+                },
+                "y": {
+                  "fieldName": "constituency_name",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "Constituency"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Days forecast at Medium or above, last 12 months"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 3,
+            "height": 9
+          }
+        },
+        {
+          "widget": {
+            "name": "health_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "health",
+                  "fields": [
+                    {
+                      "name": "check_name",
+                      "expression": "`check_name`"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "value",
+                      "expression": "`value`"
+                    },
+                    {
+                      "name": "detail",
+                      "expression": "`detail`"
+                    },
+                    {
+                      "name": "checked_at",
+                      "expression": "`checked_at`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "check_name",
+                    "displayName": "check name"
+                  },
+                  {
+                    "fieldName": "status",
+                    "displayName": "status"
+                  },
+                  {
+                    "fieldName": "value",
+                    "displayName": "value"
+                  },
+                  {
+                    "fieldName": "detail",
+                    "displayName": "detail"
+                  },
+                  {
+                    "fieldName": "checked_at",
+                    "displayName": "checked at"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Pipeline health"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 17,
+            "width": 3,
+            "height": 9
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ]
+}
