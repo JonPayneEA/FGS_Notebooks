@@ -614,8 +614,10 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
 `TBL_WISKI_LOOKUP`, `TBL_EA_THRESHOLDS`, `WISKI_LOOKUP_CSV`, `THRESHOLDS_CSV`).
 
 - **15** fetches every station in one bulk call. Job `09` makes about 3,000
-  separate station calls for similar information, so it could read `ea_rt_stations`
-  instead. That is not wired up.
+  separate station calls for similar information. Where those calls time out, `09`
+  now fills registered stations that have no enrichment from `ea_rt_stations` in
+  one query (run 15 first). That table has no `ea_region_name`, `ea_area_name` or
+  `datum`, so those stay empty for stations filled this way.
 - **16** joins `ea_rt_measure_register` to the WISKI CSV on station only. A station
   has several measures, and the lookup may have a row per parameter, so a measure
   can pick up another parameter's WISKI id. The notebook prints a warning when the
