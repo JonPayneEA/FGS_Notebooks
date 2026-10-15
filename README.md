@@ -88,7 +88,12 @@ folder can sit anywhere. Nothing refers to one person's workspace folder.
 9. `jobs/11_flood_warnings_ingest`, then `jobs/13_warning_constituency_contacts`.
    Step 13 needs the lookup (4), the MP table (3) and the current warnings (this
    step), so it is last.
-10. Schedule the masters (see `workflows/scheduling_guide.md`).
+10. The products built on those tables, in this order (see "Products built on the
+    forecast and warnings" below): `jobs/18_fgs_changes` (needs at least two
+    complete statements, otherwise it exits `no_previous`),
+    `jobs/19_constituency_flood_situation`, `jobs/20_mp_briefing_drafts`,
+    `jobs/21_fgs_constituency_exposure`, `jobs/22_pipeline_health`.
+11. Schedule the masters (see `workflows/scheduling_guide.md`).
 
 ### Starting over on an existing install
 
@@ -160,6 +165,11 @@ other, never both.
 | `flood_warnings_log` | Every poll | Append-only log of NEW / SEVERITY_CHANGE / MESSAGE_CHANGE / CLOSED events. |
 | `fgs_constituency_mp_contacts` | Every poll | The latest complete FGS forecast (proactive): one row per geometry, day, source and constituency, with the sitting MP and contact details. |
 | `flood_warning_constituency_contacts` | Every poll | Current warnings and alerts, one row per constituency each overlaps, with the sitting MP and contact details. |
+| `fgs_constituency_changes` | Every poll (18) | What changed against the previous statement, per constituency, forecast day and flood source. History: rows for each statement are kept. |
+| `constituency_flood_situation` | Every poll (19) | One row per constituency: worst forecast risk and when, risk by day, escalation flag, warnings and alerts in force, and the MP. |
+| `mp_briefing_drafts` | Every poll (20) | DRAFT briefings for MPs whose constituency is forecast at risk. Nothing is sent. `status` starts as `draft`. |
+| `fgs_constituency_exposure` | Daily (21) | Days each constituency sat at each risk rank, by calendar month and flood source. Sparse. |
+| `pipeline_health` | Every poll (22) | One row per health check (age and completeness of the outputs), plus an overall row. |
 | `ea_administrative_areas` | Manual | EA and Natural England administrative boundaries. |
 | `ea_rt_stations` | Manual (15) | Every EA real-time station, one row per station, from the stations API. |
 | `ea_rt_station_measures` | Manual (15) | One row per measure, keyed by `stationReference`. |
@@ -294,7 +304,12 @@ flowchart TD
     G --> H["09 ea_rt_measure_register"]
     H --> H2["11 flood_warnings_ingest"]
     H2 --> H3["13 warning_constituency_contacts"]
-    H3 --> I(["Schedule the four masters"])
+    H3 --> P1["18 fgs_changes"]
+    P1 --> P2["19 constituency_flood_situation"]
+    P2 --> P3["20 mp_briefing_drafts"]
+    P3 --> P4["21 fgs_constituency_exposure"]
+    P4 --> P5["22 pipeline_health"]
+    P5 --> I(["Schedule the four masters"])
 ```
 
 ### Polling (Master_polling, every 30 or 60 minutes)
@@ -325,7 +340,15 @@ flowchart TD
     S4 --> W4["Append NEW, CHANGE and CLOSED events<br/>to the log, then overwrite current state<br/>Exit success or no_change"]
     W4 --> S5["Step 5: 13_warning_constituency_contacts<br/>(reactive, no window check)"]
     S5 --> W5["Rebuild warnings x constituencies x MP contacts<br/>Exit success"]
-    W5 --> D3{"Did any step fail?"}
+    W5 --> S6["Step 6: 18_fgs_changes"]
+    S6 --> W6["Compare the latest complete statement with the previous one<br/>Exit success or no_previous"]
+    W6 --> S7["Step 7: 19_constituency_flood_situation"]
+    S7 --> W7["One row per constituency: forecast, warnings, MP<br/>Exit success"]
+    W7 --> S8["Step 8: 20_mp_briefing_drafts"]
+    S8 --> W8["Drafts only, never sent. Refuses if step 7 is out of date<br/>Exit success"]
+    W8 --> S9["Step 9: 22_pipeline_health"]
+    S9 --> W9["Write one row per check. Raises if a check fails<br/>Exit success"]
+    W9 --> D3{"Did any step fail?"}
     D3 -- yes --> F(["Raise: run marked failed"])
     D3 -- no --> OK(["Exit success"])
 ```
@@ -344,6 +367,9 @@ flowchart TD
     F -- no --> Z2(["Exit success"])
     F -- yes --> G["09_ea_rt_measure_register<br/>enrich new stations, merge new measures"]
     G --> Z2
+    M(["Master_daily run"]) --> A
+    M --> X1["21_fgs_constituency_exposure<br/>(independent of the archive)"]
+    X1 --> X2["Rebuild constituency x month x source exposure<br/>Exit success"]
 ```
 
 ### Weekly (Sunday 02:00 UTC) and quarterly (or after an election)
@@ -516,6 +542,111 @@ Notes on the table:
   The job lists these. If none match, the job fails, because that means the EA
   warning codes and the area codes no longer agree.
 
+## Products built on the forecast and warnings
+
+Five notebooks turn the intersection and contact tables into things you can use
+directly. None does spatial work: all are plain Spark SQL over tables that already
+exist, so they are cheap. `18`, `19`, `20` and `22` run on every poll (steps 6 to 9
+of `Master_polling`). `21` runs daily (step 2 of `Master_daily`).
+
+Ranks used throughout: 1 Very Low, 2 Low, 3 Medium, 4 High, 0 nothing flagged.
+
+### What changed: `fgs_constituency_changes` (18)
+
+Compares the latest complete statement with the one before it, per constituency,
+forecast day and flood source. Only days both statements cover are compared, so a
+day rolling off the old statement or a day newly added is never reported as a
+change. Unchanged cells are not stored. `change_type` is `new`, `escalated`,
+`de_escalated` or `cleared`. Rows for each statement are kept, so the table is a
+history of changes.
+
+```sql
+-- escalations in the latest statement, worst first
+SELECT constituency_name, forecast_date, source, previous_rank, new_rank
+FROM prd_dash_lab.flood_forecasting_unrestricted.fgs_constituency_changes
+WHERE statement_id = (SELECT MAX(statement_id)
+                      FROM prd_dash_lab.flood_forecasting_unrestricted.fgs_constituency_changes)
+  AND change_type IN ('escalated', 'new')
+ORDER BY new_rank DESC, constituency_name;
+```
+
+### One row per constituency: `constituency_flood_situation` (19)
+
+Every constituency, with the worst forecast risk over five days (`fgs_worst_rank`,
+`fgs_worst_level`, `fgs_worst_date`, `fgs_worst_sources`), the risk on each day
+(`fgs_rank_day1` to `fgs_rank_day5`), `fgs_escalated`, counts of severe warnings,
+warnings and alerts in force, and the MP. The forecast and the warnings stay in
+separate columns on purpose: one says what may happen, the other what the EA
+expects. There is no combined score. Observed gauge levels are not included yet.
+
+```sql
+SELECT constituency_name, mp_name, fgs_worst_level, fgs_worst_date, fgs_escalated,
+       severe_warnings, warnings, alerts
+FROM prd_dash_lab.flood_forecasting_unrestricted.constituency_flood_situation
+WHERE fgs_worst_rank >= 3 OR has_active_warning
+ORDER BY fgs_worst_rank DESC, severe_warnings DESC, warnings DESC;
+```
+
+### MP briefing drafts: `mp_briefing_drafts` (20)
+
+A subject and plain-text body per MP whose constituency reaches
+`BRIEFING_MIN_RISK_RANK` (default 3, Medium) on any of the five days.
+**Nothing is sent.** The wording is factual (what the statement says, which days,
+which sources, whether it has risen), gives no advice, and leaves the sender and
+sign-off as a placeholder. A person reviews each draft and sends it by their own
+route, then sets `status` (for example `reviewed`, `sent`, `rejected`) and
+`reviewed_by`. Re-running for the same statement replaces drafts still marked
+`draft` and never touches a row that has moved on. Vacant seats get no draft.
+
+```sql
+SELECT mp_name, mp_email, constituency_name, worst_level, is_escalation, subject, body
+FROM prd_dash_lab.flood_forecasting_unrestricted.mp_briefing_drafts
+WHERE statement_id = (SELECT MAX(statement_id)
+                      FROM prd_dash_lab.flood_forecasting_unrestricted.mp_briefing_drafts)
+  AND status = 'draft'
+ORDER BY worst_rank DESC;
+```
+
+### Exposure history: `fgs_constituency_exposure` (21)
+
+Days each constituency sat at each risk rank, by calendar month and flood source
+(`source = 'any'` is the worst across sources). Statements overlap, so to count
+each date once it uses **day 1 of the last statement issued on each date**. Days 2
+to 5 are not counted. The table is sparse: a month with no flagged day has no row,
+and `days_covered` (days in that month with a statement) is the denominator. A
+gap in the statement history is not counted as a quiet day.
+
+```sql
+-- the 20 constituencies with most Medium-or-above days in the last 12 months
+SELECT constituency_name, SUM(days_medium_or_above) AS days_medium_or_above
+FROM prd_dash_lab.flood_forecasting_unrestricted.fgs_constituency_exposure
+WHERE source = 'any' AND month >= date_format(add_months(current_date(), -12), 'yyyy-MM')
+GROUP BY constituency_name
+ORDER BY days_medium_or_above DESC
+LIMIT 20;
+```
+
+### Pipeline health: `pipeline_health` (22)
+
+One row per check, with `status` of `ok`, `info`, `warn` or `fail`, and an
+`overall` row. The checks measure the age and completeness of what the pipeline
+produces, so a pipeline that has stopped running shows up as well as one that is
+failing: newest statement, statements awaiting intersections, age of
+`constituency_flood_situation`, age of the warnings ingest, unlinked warnings, MP
+and constituency counts, unmatched MPs. Limits are `HEALTH_*` in `config.py`. The
+notebook raises if any check is `fail`, so a scheduled run is marked failed and
+your alerts fire.
+
+### Dashboard
+
+A Databricks AI/BI dashboard needs no new tables. Build the datasets from these
+queries: the situation query above (a table with conditional formatting on
+`fgs_worst_rank`), the escalation query (a short "what changed" list), the
+exposure query (a bar chart), and `SELECT * FROM pipeline_health` (a status
+panel). For a map, join `constituency_flood_situation` to
+`parliamentary_constituencies` on `constituency_id` and use the `geometry` column.
+The dashboard object itself is not in this repository.
+
 ## Typical query: which MPs need to be alerted?
 
 ```sql
@@ -594,6 +725,11 @@ Then run `master_quarterly` (or `06_compute_lookup` followed by
 │   ├── 11_flood_warnings_ingest       EA flood warnings current state + log
 │   ├── 13_warning_constituency_contacts  Current warnings x constituencies x MPs
 │   ├── 14_fgs_constituency_contacts   Latest FGS forecast x constituencies x MPs
+│   ├── 18_fgs_changes                 What changed since the previous statement
+│   ├── 19_constituency_flood_situation  One row per constituency
+│   ├── 20_mp_briefing_drafts          Draft MP briefings (never sent)
+│   ├── 21_fgs_constituency_exposure   Days at each risk rank, by month
+│   ├── 22_pipeline_health             Age and completeness checks
 │   ├── 12_ea_area_boundaries_download EA administrative boundaries (manual)
 │   ├── 15_rt_station_measure_register All EA stations and measures (manual)
 │   ├── 16_build_wiski_lookup          Measures x WISKI ids from an external CSV (manual)

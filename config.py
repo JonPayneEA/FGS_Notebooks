@@ -138,6 +138,13 @@ TBL_EA_ADMIN_AREAS      = f"{CATALOG}.{SCHEMA}.ea_administrative_areas"
 TBL_EA_RT_STATIONS      = f"{CATALOG}.{SCHEMA}.ea_rt_stations"
 TBL_EA_RT_STATION_MEASURES = f"{CATALOG}.{SCHEMA}.ea_rt_station_measures"
 TBL_WISKI_LOOKUP        = f"{CATALOG}.{SCHEMA}.ea_rt_wiski_lookup"
+
+# Products built on the FGS and warning tables (jobs 18 to 22)
+TBL_FGS_CHANGES         = f"{CATALOG}.{SCHEMA}.fgs_constituency_changes"
+TBL_CONST_SITUATION     = f"{CATALOG}.{SCHEMA}.constituency_flood_situation"
+TBL_MP_BRIEFING_DRAFTS  = f"{CATALOG}.{SCHEMA}.mp_briefing_drafts"
+TBL_FGS_EXPOSURE        = f"{CATALOG}.{SCHEMA}.fgs_constituency_exposure"
+TBL_PIPELINE_HEALTH     = f"{CATALOG}.{SCHEMA}.pipeline_health"
 TBL_EA_THRESHOLDS       = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_thresholds_all"
 
 # Externally supplied CSVs, read from Unity Catalog volumes by notebooks 16 and 17.
@@ -186,6 +193,31 @@ if FGS_GEOMETRY_SOURCE not in ("risk_areas", "aoc"):
     raise ValueError(
         f"FGS_GEOMETRY_SOURCE must be 'risk_areas' or 'aoc', not {FGS_GEOMETRY_SOURCE!r}"
     )
+
+# -----------------------------------------------------------------------------
+# MP BRIEFING DRAFTS (job 20)
+# A draft is written for an MP when the forecast for their constituency reaches
+# this risk rank on any of the five days: 1 Very Low, 2 Low, 3 Medium, 4 High.
+# Drafts are never sent. They wait in mp_briefing_drafts for a person to review.
+# -----------------------------------------------------------------------------
+BRIEFING_MIN_RISK_RANK = 3
+
+if BRIEFING_MIN_RISK_RANK not in (1, 2, 3, 4):
+    raise ValueError(f"BRIEFING_MIN_RISK_RANK must be 1 to 4, not {BRIEFING_MIN_RISK_RANK!r}")
+
+# -----------------------------------------------------------------------------
+# PIPELINE HEALTH (job 22)
+# Age limits in hours. Beyond WARN the check reads "warn"; beyond FAIL it reads
+# "fail". The FGS is issued once a day, so its limits are wide.
+# -----------------------------------------------------------------------------
+HEALTH_FGS_WARN_HOURS      = 30
+HEALTH_FGS_FAIL_HOURS      = 54
+HEALTH_WARNINGS_WARN_HOURS = 3
+HEALTH_WARNINGS_FAIL_HOURS = 12
+HEALTH_CONTACTS_WARN_HOURS = 3
+HEALTH_CONTACTS_FAIL_HOURS = 12
+HEALTH_MP_WARN_DAYS        = 10     # MP details refresh weekly
+HEALTH_MP_FAIL_DAYS        = 21
 
 # -----------------------------------------------------------------------------
 # SPATIAL INTERSECTION THRESHOLDS

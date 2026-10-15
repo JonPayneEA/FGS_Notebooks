@@ -43,6 +43,14 @@ resources:
     #                                              ingest failed, from the last
     #                                              good current state)
     #
+    #   Products (plain SQL, run after the tasks above whatever their outcome):
+    #   compute_intersections --> fgs_changes
+    #   fgs_contacts + warning_contacts + fgs_changes --> constituency_situation
+    #   constituency_situation --> mp_briefing_drafts   (DRAFTS ONLY, nothing is sent)
+    #   constituency_situation + mp_briefing_drafts --> pipeline_health
+    #                                              (fails the run if a check fails,
+    #                                               so alerts fire)
+    #
     # Adjust the cron to the cadence you can run (every 30 or 60 minutes).
     # -------------------------------------------------------------------------
     fgs_polling_workflow:
@@ -97,6 +105,49 @@ resources:
           run_if: ALL_DONE
           notebook_task:
             notebook_path: "../jobs/13_warning_constituency_contacts.ipynb"
+          existing_cluster_id: ${var.cluster_id}
+          timeout_seconds: 300
+
+        - task_key: "fgs_changes"
+          description: "What changed since the previous FGS, per constituency, day and source"
+          depends_on:
+            - task_key: "compute_intersections"
+          run_if: ALL_DONE
+          notebook_task:
+            notebook_path: "../jobs/18_fgs_changes.ipynb"
+          existing_cluster_id: ${var.cluster_id}
+          timeout_seconds: 300
+
+        - task_key: "constituency_situation"
+          description: "One row per constituency: forecast, warnings and MP"
+          depends_on:
+            - task_key: "fgs_contacts"
+            - task_key: "warning_contacts"
+            - task_key: "fgs_changes"
+          run_if: ALL_DONE
+          notebook_task:
+            notebook_path: "../jobs/19_constituency_flood_situation.ipynb"
+          existing_cluster_id: ${var.cluster_id}
+          timeout_seconds: 300
+
+        - task_key: "mp_briefing_drafts"
+          description: "Draft briefings for MPs whose constituency is forecast at risk (never sent)"
+          depends_on:
+            - task_key: "constituency_situation"
+          run_if: ALL_DONE
+          notebook_task:
+            notebook_path: "../jobs/20_mp_briefing_drafts.ipynb"
+          existing_cluster_id: ${var.cluster_id}
+          timeout_seconds: 300
+
+        - task_key: "pipeline_health"
+          description: "Age and completeness checks on the pipeline outputs; fails if a check fails"
+          depends_on:
+            - task_key: "constituency_situation"
+            - task_key: "mp_briefing_drafts"
+          run_if: ALL_DONE
+          notebook_task:
+            notebook_path: "../jobs/22_pipeline_health.ipynb"
           existing_cluster_id: ${var.cluster_id}
           timeout_seconds: 300
 
@@ -216,3 +267,11 @@ resources:
             notebook_path: "../jobs/10_ea_rt_daily_archive.ipynb"
           existing_cluster_id: ${var.cluster_id}
           timeout_seconds: 7200
+
+        # Independent of the archive: runs even if the file is not yet available.
+        - task_key: "fgs_exposure"
+          description: "Days each constituency was forecast at each FGS risk rank, by month and source"
+          notebook_task:
+            notebook_path: "../jobs/21_fgs_constituency_exposure.ipynb"
+          existing_cluster_id: ${var.cluster_id}
+          timeout_seconds: 1800

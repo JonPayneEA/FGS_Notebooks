@@ -11,6 +11,7 @@ from utils.helpers import (  # noqa: E402
     IMPACT_LABELS, LIKELIHOOD_LABELS, build_geojson_geometry,
     parse_risk_rows, parse_aoc_rows, parse_block_rows, parse_statement_row, RISK_SCHEMA,
     AOC_SCHEMA, BLOCK_SCHEMA, STATEMENT_SCHEMA, to_native,
+    risk_rank_sql, risk_level_sql,
 )
 
 POLYGON = [[[-1.5, 53.2], [-1.3, 53.2], [-1.3, 53.4], [-1.5, 53.2]]]
@@ -200,3 +201,17 @@ def test_ffc_get_passes_its_timeout_and_attempts_through(monkeypatch):
     monkeypatch.setattr(requests, "get", capture)
     assert helpers.ffc_get("http://x", "KEY", timeout=150) == {"statements": []}
     assert seen == {"timeout": 150, "key": "KEY"}
+
+
+def test_risk_rank_sql_covers_every_level_and_defaults_to_zero():
+    sql = risk_rank_sql("i.risk_level")
+    for level, rank in (("Very Low", 1), ("Low", 2), ("Medium", 3), ("High", 4)):
+        assert f"WHEN '{level}' THEN {rank}" in sql
+    assert sql.startswith("CASE i.risk_level") and sql.endswith("ELSE 0 END")
+
+
+def test_risk_level_sql_is_the_inverse_and_has_no_zero_branch():
+    sql = risk_level_sql("MAX(c.rk)")
+    for level, rank in (("Very Low", 1), ("Low", 2), ("Medium", 3), ("High", 4)):
+        assert f"WHEN {rank} THEN '{level}'" in sql
+    assert "ELSE" not in sql        # rank 0 gives NULL, so callers can COALESCE to 'None'

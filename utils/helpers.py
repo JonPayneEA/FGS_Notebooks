@@ -690,6 +690,49 @@ def source_predicate(spark: SparkSession, table_name: str, source: str,
     return "1 = 1" if source == legacy_source else "1 = 0"
 
 
+def risk_rank_sql(column: str) -> str:
+    """SQL expression turning a risk_level text into its rank: 1 Very Low (Green),
+    2 Low (Yellow), 3 Medium (Amber), 4 High (Red), 0 unknown or none."""
+    return (f"CASE {column} WHEN 'Very Low' THEN 1 WHEN 'Low' THEN 2 "
+            f"WHEN 'Medium' THEN 3 WHEN 'High' THEN 4 ELSE 0 END")
+
+
+def risk_level_sql(rank_expr: str) -> str:
+    """Inverse of risk_rank_sql: rank back to the level text (NULL for 0)."""
+    return (f"CASE {rank_expr} WHEN 1 THEN 'Very Low' WHEN 2 THEN 'Low' "
+            f"WHEN 3 THEN 'Medium' WHEN 4 THEN 'High' END")
+
+
+def latest_complete_statements(spark: SparkSession, tbl_statements: str,
+                               tbl_log: str, geometry_source: str,
+                               n: int = 1) -> list:
+    """
+    The newest n statements whose intersections are complete and up to date for
+    one geometry source, newest first. A statement counts as complete when
+    fgs_intersections_log holds a row for it at the statement's current
+    last_modified_at, so a statement amended upstream but not yet re-intersected
+    is skipped until 07 catches up.
+
+    Returns a list of dicts: statement_id, issued_at, last_modified_at,
+    intersections_computed_at. An empty list means nothing is complete yet.
+    """
+    in_source = source_predicate(spark, tbl_log, geometry_source, alias="l")
+    rows = spark.sql(f"""
+        SELECT l.statement_id,
+               s.issued_at,
+               s.last_modified_at,
+               l.computed_at AS intersections_computed_at
+        FROM {tbl_log} l
+        JOIN {tbl_statements} s
+          ON s.statement_id = l.statement_id
+         AND COALESCE(s.last_modified_at, '') = COALESCE(l.last_modified_at, '')
+        WHERE {in_source}
+        ORDER BY s.issued_at DESC, l.statement_id DESC
+        LIMIT {int(n)}
+    """).collect()
+    return [r.asDict() for r in rows]
+
+
 def replace_statement_rows(spark: SparkSession, table_name: str,
                            statement_ids: list, rows: list,
                            schema: StructType,
