@@ -141,6 +141,7 @@ TBL_WISKI_LOOKUP        = f"{CATALOG}.{SCHEMA}.ea_rt_wiski_lookup"
 
 # Products built on the FGS and warning tables (jobs 18 to 22)
 TBL_FGS_CHANGES         = f"{CATALOG}.{SCHEMA}.fgs_constituency_changes"
+TBL_FGS_CHANGES_LOG     = f"{CATALOG}.{SCHEMA}.fgs_changes_log"
 TBL_CONST_SITUATION     = f"{CATALOG}.{SCHEMA}.constituency_flood_situation"
 TBL_MP_BRIEFING_DRAFTS  = f"{CATALOG}.{SCHEMA}.mp_briefing_drafts"
 TBL_FGS_EXPOSURE        = f"{CATALOG}.{SCHEMA}.fgs_constituency_exposure"
