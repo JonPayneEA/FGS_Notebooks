@@ -841,6 +841,8 @@ ones. See "History is an archive" above.
 │   └── 17_build_thresholds_table      Flood thresholds into the restricted schema (manual)
 ├── master/                            Schedule these notebooks
 │   ├── Master_polling, Master_daily, Master_weekly, Master_quarterly
+├── explore/
+│   └── Explore_live_readings          Filter and plot the readings, with an archive | live line (by hand)
 ├── dashboards/
 │   └── fgs_flood_situation.lvdash.json  AI/BI dashboard (untested import)
 ├── tests/                             pytest suite for the parsing and spatial helpers
@@ -848,6 +850,27 @@ ones. See "History is an archive" above.
     ├── databricks_workflows.yml       Workflow definitions (optional)
     └── scheduling_guide.md            Notebook scheduler instructions
 ```
+
+## Exploring the readings: `explore/Explore_live_readings`
+
+An interactive notebook, run by hand, for looking at the river and sea readings. Run
+all cells and the controls appear under the last one:
+
+- Narrow by **EA area**, **river**, **parameter** and **station**. Each list offers only
+  choices that still lead somewhere, so you cannot pick an empty combination.
+- Pick one or more **measures** (up to 8). Different units, such as levels and flows,
+  get a panel each. Choosing a single station preselects its measures.
+- Drag the **days** slider, 1 to 30, for how far back to look.
+- A **dashed red line** marks where the archive ends and the live tail begins: midnight
+  at the end of the last day the daily archive has landed in bronze. The shaded band to
+  its right is live (job 23) and not yet archived. Under the chart it prints how many
+  readings fall each side, and how old the newest reading is.
+
+It reads `ea_rt_readings_all`, `ea_rt_measure_register` and `ea_rt_readings_bronze`
+and writes nothing, so it needs job 23 to have run once. The filtering, the boundary and
+the summary live in `utils/explore.py` and are covered by `tests/test_explore.py`; the
+widgets and the chart are checked by running the notebook. Show the Open Government
+Licence attribution wherever the readings are shown.
 
 ## Manual reference notebooks (15 to 17)
 
