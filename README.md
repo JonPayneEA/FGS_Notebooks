@@ -682,6 +682,14 @@ route, then sets `status` (for example `reviewed`, `sent`, `rejected`) and
 `reviewed_by`. Re-running for the same statement replaces drafts still marked
 `draft` and never touches a row that has moved on. Vacant seats get no draft.
 
+A draft also says how many flood warning areas and flood alert areas sit under the
+forecast, for example "10 flood warning areas and 3 flood alert areas lie under the
+forecast Medium river flood risk". These are potential warnings and alerts (places
+where one could be issued), not ones in force, which the draft states separately.
+Only areas under polygons at the constituency's worst risk, for the flood sources
+behind it, are counted. An area counts when at least `WARNING_CONTACT_MIN_PCT` of it
+lies inside the constituency. If there are none, the sentence is left out.
+
 ```sql
 SELECT mp_name, mp_email, constituency_name, worst_level, is_escalation, subject, body
 FROM prd_dash_lab.flood_forecasting_unrestricted.mp_briefing_drafts
