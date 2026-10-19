@@ -238,6 +238,12 @@ HEALTH_CONTACTS_FAIL_HOURS = 12
 HEALTH_MP_WARN_DAYS        = 10     # MP details refresh weekly
 HEALTH_MP_FAIL_DAYS        = 21
 
+# Live EA real-time readings (job 23): age in hours of the newest reading ingested. This
+# check WARNS at most and never fails: a stale feed is usually the EA API having a bad
+# spell, not the pipeline failing, and it must not fail the polling run that carries the
+# FGS and warnings alerts.
+HEALTH_LIVE_WARN_HOURS     = 1
+
 # -----------------------------------------------------------------------------
 # SPATIAL INTERSECTION THRESHOLDS
 # EA flood areas with less than this proportion of their area covered by an

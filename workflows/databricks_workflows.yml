@@ -18,7 +18,6 @@
 #   2. fgs_weekly_workflow    -- weekly, Sunday 02:00 UTC
 #   3. fgs_quarterly_workflow -- quarterly (or run manually after an election)
 #   4. ea_rt_daily_workflow   -- daily EA real-time archive ingest
-#   5. ea_rt_live_workflow    -- OPTIONAL 15-minute live readings (created paused)
 #
 # FIRST RUN: run 02_backfill_fgs once, then 07_compute_intersections once with
 # recompute_all=true, before enabling the schedules.
@@ -52,21 +51,26 @@ resources:
     #                                              (fails the run if a check fails,
     #                                               so alerts fire)
     #
-    # Adjust the cron to the cadence you can run (every 30 or 60 minutes).
+    # Runs every 15 minutes. The EA real-time API and the EA flood warnings API both
+    # refresh every 15 minutes, so this is the finest cadence that adds anything. Every
+    # task is idempotent and exits quickly when there is nothing new. If a run can take
+    # longer than 15 minutes, the next one is skipped (max_concurrent_runs: 1), so check
+    # the run durations before going finer, and slacken the cron if they approach 15.
     # -------------------------------------------------------------------------
     fgs_polling_workflow:
       name: "FGS Polling Workflow"
       max_concurrent_runs: 1
       schedule:
-        quartz_cron_expression: "0 0/30 * * * ?"   # Every 30 minutes
+        quartz_cron_expression: "0 0/15 * * * ?"   # Every 15 minutes
         timezone_id: "UTC"
         pause_status: "UNPAUSED"
 
       tasks:
         # Live EA real-time readings, every site. Independent of every other task (no
         # depends_on), so it is never blocked by the FGS steps and never blocks them.
-        # It skips itself if filled in the last 10 minutes, so it can safely share a
-        # schedule with ea_rt_live_workflow below.
+        # Its failure should not fail the FGS alert path: leave it out of any task that
+        # depends on it, and rely on the ea_live_readings_age health check (it warns,
+        # never fails). It skips itself if filled in the last 10 minutes.
         - task_key: "ea_rt_live"
           description: "Latest EA real-time reading for every measure into ea_rt_readings_live"
           notebook_task:
@@ -276,30 +280,3 @@ resources:
             notebook_path: "../jobs/21_fgs_constituency_exposure.ipynb"
           existing_cluster_id: ${var.cluster_id}
           timeout_seconds: 1800
-
-    # -------------------------------------------------------------------------
-    # WORKFLOW 5: LIVE READINGS EVERY 15 MINUTES (optional, created PAUSED)
-    # The polling workflow above already runs the live readings task every 30
-    # minutes. The EA API refreshes every 15 minutes, so this runs the same task at
-    # that rate on its own, without repeating the rest of the polling run. The task
-    # skips itself if the table was filled in the last 10 minutes, so the two
-    # schedules cannot double-call the API. Unpause this to get 15-minute readings
-    # while leaving polling at 30 minutes.
-    # -------------------------------------------------------------------------
-    ea_rt_live_workflow:
-      name: "EA Real-Time Live Readings (15 min)"
-      max_concurrent_runs: 1
-      schedule:
-        quartz_cron_expression: "0 0/15 * * * ?"   # Every 15 minutes
-        timezone_id: "UTC"
-        pause_status: "PAUSED"
-
-      tasks:
-        - task_key: "ea_rt_live"
-          description: "Latest EA real-time reading for every measure into ea_rt_readings_live"
-          notebook_task:
-            notebook_path: "../jobs/23_ea_rt_live_readings.ipynb"
-            base_parameters:
-              min_age_minutes: "10"
-          existing_cluster_id: ${var.cluster_id}
-          timeout_seconds: 180
