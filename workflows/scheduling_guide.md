@@ -53,8 +53,10 @@
 # Schedule: Weekly, Sunday 02:00 UTC
 # Cron:     0 0 2 ? * SUN
 #
-# Refreshes EA flood areas, MP contacts, and recomputes all intersections.
-# The recompute replaces each statement's rows, so it never duplicates data.
+# Refreshes EA flood areas and MP contacts, then recomputes the EA area /
+# constituency lookup. It does NOT recompute historical intersections: each
+# statement keeps the intersections computed when it was issued, so the tables
+# are an archive of what was recommended at the time.
 # Runs overnight to avoid competing with the polling job.
 # =============================================================================
 
@@ -66,7 +68,9 @@
 # Cron:     0 0 3 1 1,4,7,10 ?
 #           (03:00 UTC on 1 Jan, 1 Apr, 1 Jul, 1 Oct)
 #
-# Refreshes constituency boundaries and recomputes all intersections.
+# Refreshes constituency boundaries and recomputes the EA area / constituency
+# lookup. Statements already issued keep the intersections computed against the
+# boundaries of their time; new statements use the new boundaries.
 # Also run manually immediately after a general election or boundary review.
 # After an election, also run master_weekly.py to refresh MP details.
 # =============================================================================

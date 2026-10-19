@@ -155,11 +155,16 @@ resources:
     # -------------------------------------------------------------------------
     # WORKFLOW 2: WEEKLY REFRESH
     #   refresh_ea_flood_areas \
-    #                           --> compute_lookup --> recompute_intersections
+    #                           --> compute_lookup
     #   refresh_mp_details     /
     #
-    # The two refreshes run in parallel. recompute_all is safe to run weekly:
-    # each statement's rows are replaced, never duplicated.
+    # The two refreshes run in parallel.
+    #
+    # Historical intersections are deliberately NOT recomputed here. Each statement
+    # keeps the intersections computed when it was issued, so the tables stay an
+    # archive of what was recommended at the time. New statements are intersected
+    # by the polling workflow. For a full recompute, run 07_compute_intersections
+    # by hand with recompute_all = true.
     # -------------------------------------------------------------------------
     fgs_weekly_workflow:
       name: "FGS Weekly Refresh"
@@ -191,16 +196,6 @@ resources:
             notebook_path: "../jobs/06_compute_lookup.ipynb"
           existing_cluster_id: ${var.cluster_id}
 
-        - task_key: "recompute_intersections"
-          description: "Recompute all FGS intersections against refreshed EA areas"
-          depends_on:
-            - task_key: "compute_lookup"
-          notebook_task:
-            notebook_path: "../jobs/07_compute_intersections.ipynb"
-            base_parameters:
-              recompute_all: "true"
-          existing_cluster_id: ${var.cluster_id}
-          timeout_seconds: 7200
 
 
     # -------------------------------------------------------------------------
@@ -208,7 +203,10 @@ resources:
     # Run manually straight after a general election or boundary review; do not
     # wait for the schedule. Also run the weekly workflow to refresh MPs.
     #
-    #   refresh_boundaries --> compute_lookup --> recompute_intersections
+    #   refresh_boundaries --> compute_lookup
+    #
+    # Statements already issued keep the intersections computed against the
+    # boundaries of their time. New statements use the new boundaries.
     # -------------------------------------------------------------------------
     fgs_quarterly_workflow:
       name: "FGS Quarterly Boundary Refresh"
@@ -232,17 +230,6 @@ resources:
           notebook_task:
             notebook_path: "../jobs/06_compute_lookup.ipynb"
           existing_cluster_id: ${var.cluster_id}
-
-        - task_key: "recompute_intersections"
-          description: "Recompute all FGS intersections against new boundaries"
-          depends_on:
-            - task_key: "compute_lookup"
-          notebook_task:
-            notebook_path: "../jobs/07_compute_intersections.ipynb"
-            base_parameters:
-              recompute_all: "true"
-          existing_cluster_id: ${var.cluster_id}
-          timeout_seconds: 7200
 
 
     # -------------------------------------------------------------------------
