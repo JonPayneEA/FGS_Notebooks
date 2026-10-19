@@ -168,7 +168,7 @@ other, never both.
 | `flood_warnings_log` | Every poll | Append-only log of NEW / SEVERITY_CHANGE / MESSAGE_CHANGE / CLOSED events. |
 | `fgs_constituency_mp_contacts` | Every poll | The latest complete FGS forecast (proactive): one row per geometry, day, source and constituency, with the sitting MP and contact details. |
 | `flood_warning_constituency_contacts` | Every poll | Current warnings and alerts, one row per constituency each overlaps, with the sitting MP and contact details. |
-| `fgs_changes_log` | Every poll (18) | One row per statement compared, with the number of differences. A zero means the comparison ran and nothing moved; no row means 18 has not compared that statement. |
+| `fgs_changes_log` | Every poll (18) | One row per statement compared, with the number of differences. A zero means the comparison ran and nothing moved on the days both statements cover; no row means 18 has not compared that statement. It also holds `flagged_*` and `medium_plus_*`: how many constituencies each statement flags over all five of its own days, so "30 at Very Low yesterday, none today" shows even when those days have rolled off. |
 | `fgs_constituency_changes` | Every poll (18) | What changed against the previous statement, per constituency, forecast day and flood source. History: rows for each statement are kept. |
 | `constituency_flood_situation` | Every poll (19) | One row per constituency: worst forecast risk and when, risk by day, escalation flag, warnings and alerts in force, and the MP. |
 | `mp_briefing_drafts` | Every poll (20) | DRAFT briefings for MPs whose constituency is forecast at risk. Nothing is sent. `status` starts as `draft`. |
