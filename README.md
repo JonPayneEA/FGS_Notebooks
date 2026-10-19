@@ -381,22 +381,48 @@ flowchart TD
         W3["03 refresh_ea_flood_areas"]
         W4["04 refresh_mp_details"]
         W6["06 compute_lookup"]
-        W7["07 compute_intersections<br/>recompute_all = true"]
         W3 --> W6
         W4 --> W6
-        W6 --> W7
     end
     subgraph QUARTERLY["Master_quarterly"]
         Q5["05 refresh_boundaries"]
         Q6["06 compute_lookup"]
-        Q7["07 compute_intersections<br/>recompute_all = true"]
         Q5 --> Q6
-        Q6 --> Q7
     end
 ```
 
 In the workflow definition the two weekly refreshes run in parallel. In
 `Master_weekly` they run one after the other.
+
+### History is an archive: nothing recomputes it
+
+The weekly and quarterly runs do **not** recompute historical intersections. This
+is deliberate.
+
+- The statement polygons (`fgs_risk_polygons`, `fgs_aoc_polygons`) are the record
+  of what the FFC said. They never change.
+- The intersection tables are derived from them. Each statement keeps the
+  intersections computed when it was issued, against the EA areas and
+  constituencies of that time. That is what the business was recommending, to
+  whom, at the time.
+- Recomputing every week would rewrite the past against today's boundaries. After
+  a general election it would restate every old forecast in the new
+  constituencies, so the record would no longer match who held which seat then.
+  It also takes longer than any sensible job timeout.
+
+Two consequences to know about:
+
+- The history backfilled when the pipeline was first set up was intersected
+  against the boundaries in force that day, because it could not have been done
+  earlier. It is the best available, not truly as-at-the-time for old statements.
+  From then on each new statement is intersected when issued.
+- After a boundary change, `constituency_id` values that exist only afterwards
+  have no history before the change, so `fgs_constituency_exposure` for them
+  starts at the change.
+
+A full recompute is a manual, deliberate act: run `07_compute_intersections` with
+`recompute_all` = `true`. Do it only after fixing a bug in `07` or its geometry
+logic, never as routine. It overwrites the archive.
 
 ### How the tables are built
 
@@ -709,8 +735,10 @@ Run these two jobs manually, in order, before the next polling window:
 1. `05_refresh_boundaries`
 2. `04_refresh_mp_details`
 
-Then run `master_quarterly` (or `06_compute_lookup` followed by
-`07_compute_intersections` with `recompute_all` = `true`).
+Then run `master_quarterly`, or `06_compute_lookup` on its own. That updates the
+lookup used for warnings. It does not touch historical intersections: statements
+already issued keep the boundaries of their time, and new statements use the new
+ones. See "History is an archive" above.
 
 ---
 
