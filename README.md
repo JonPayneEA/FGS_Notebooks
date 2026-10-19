@@ -161,11 +161,14 @@ other, never both.
 | `fgs_intersections_log` | Per FGS issue | One row per statement and `geometry_source` once intersected, with the `last_modified_at` it was computed at. |
 | `ea_rt_readings_bronze` | Daily | EA real-time readings, partitioned by `reading_date`. |
 | `ea_rt_measure_register` | Daily (new measures) | One row per measure, enriched from the station API. |
+| `ea_rt_readings_live` | Every poll (23) | The live tail of EA real-time readings, every site: the last few days, polled from the EA API every 15 to 30 minutes. The daily archive lands one to two days late, so this covers the gap. Job 10 releases each day from it once that day is in bronze. |
+| `ea_rt_latest` (view) | Every poll (23) | The newest live reading per measure. A map colours from this. |
+| `ea_rt_readings_all` (view) | Every poll (23) | The archive and the live tail as one series. Bronze wins for any day it holds, so there are no duplicates. `source` says which. |
 | `flood_warnings_current` | Every poll | Live state of EA flood warnings and alerts. |
 | `flood_warnings_log` | Every poll | Append-only log of NEW / SEVERITY_CHANGE / MESSAGE_CHANGE / CLOSED events. |
 | `fgs_constituency_mp_contacts` | Every poll | The latest complete FGS forecast (proactive): one row per geometry, day, source and constituency, with the sitting MP and contact details. |
 | `flood_warning_constituency_contacts` | Every poll | Current warnings and alerts, one row per constituency each overlaps, with the sitting MP and contact details. |
-| `fgs_changes_log` | Every poll (18) | One row per statement compared, with the number of differences. A zero means the comparison ran and nothing moved; no row means 18 has not compared that statement. |
+| `fgs_changes_log` | Every poll (18) | One row per statement compared, with the number of differences. A zero means the comparison ran and nothing moved on the days both statements cover; no row means 18 has not compared that statement. It also holds `flagged_*` and `medium_plus_*`: how many constituencies each statement flags over all five of its own days, so "30 at Very Low yesterday, none today" shows even when those days have rolled off. |
 | `fgs_constituency_changes` | Every poll (18) | What changed against the previous statement, per constituency, forecast day and flood source. History: rows for each statement are kept. |
 | `constituency_flood_situation` | Every poll (19) | One row per constituency: worst forecast risk and when, risk by day, escalation flag, warnings and alerts in force, and the MP. |
 | `mp_briefing_drafts` | Every poll (20) | DRAFT briefings for MPs whose constituency is forecast at risk. Nothing is sent. `status` starts as `draft`. |
@@ -322,7 +325,9 @@ failures.
 
 ```mermaid
 flowchart TD
-    start(["Master_polling run"]) --> S1["Step 1: 01_ingest_fgs"]
+    start(["Master_polling run"]) --> S0["Step 0: 23_ea_rt_live_readings<br/>(first, 3 minute timeout)"]
+    S0 --> W0["Latest reading of every measure into ea_rt_readings_live<br/>Exit success, or skipped_recent if filled under 10 minutes ago"]
+    W0 --> S1["Step 1: 01_ingest_fgs"]
     S1 --> D0{"Inside the UTC<br/>polling window?"}
     D0 -- no --> X0["Exit outside_window"]
     D0 -- yes --> D1{"New or modified<br/>statement?"}
@@ -359,12 +364,14 @@ flowchart TD
 ```mermaid
 flowchart TD
     A["10_ea_rt_daily_archive"] --> B{"Yesterday's partition<br/>already in Bronze?"}
-    B -- "yes, force = false" --> Z(["Skip: exit success"])
+    B -- "yes, force = false" --> R0["Release that day from ea_rt_readings_live<br/>(in case an earlier run did not)"]
+    R0 --> Z(["Skip: exit success"])
     B -- no --> C["Download yesterday's CSV"]
     C --> D{"File available?"}
     D -- "no (404)" --> X(["Exit no_file: master fails,<br/>re-run later"])
     D -- yes --> E["Replace the reading_date partition<br/>in ea_rt_readings_bronze"]
-    E --> F{"New measure URIs not in<br/>the register?"}
+    E --> R["Release that day from ea_rt_readings_live<br/>(by day, and by measure and time)"]
+    R --> F{"New measure URIs not in<br/>the register?"}
     F -- no --> Z2(["Exit success"])
     F -- yes --> G["09_ea_rt_measure_register<br/>enrich new stations, merge new measures"]
     G --> Z2
@@ -372,6 +379,56 @@ flowchart TD
     M --> X1["21_fgs_constituency_exposure<br/>(independent of the archive)"]
     X1 --> X2["Rebuild constituency x month x source exposure<br/>Exit success"]
 ```
+
+### Live readings and the daily archive
+
+The daily archive is generated at 22:00 on the day after, and Master_daily lands it
+at 23:00, so `ea_rt_readings_bronze` is one to two days behind. `23_ea_rt_live_readings`
+fills that gap: it fetches the latest reading of every measure (every site) from the EA
+API and keeps the last few days in `ea_rt_readings_live`. When a day's archive reaches
+bronze, `10_ea_rt_daily_archive` releases that day from the live table. The archive is
+the record and includes late telemetry; the live table is only the gap.
+
+```mermaid
+flowchart LR
+    API["EA real-time API<br/>latest reading of every measure,<br/>refreshed every 15 minutes"] --> J23
+    ARC["EA archive file for day D<br/>generated 22:00 on day D+1"] --> J10
+
+    subgraph JOBS["Pipeline jobs"]
+        J23["23_ea_rt_live_readings<br/>every 15 to 30 minutes<br/>1. fetch every measure<br/>2. insert new readings only<br/>3. trim older than 4 days"]
+        J10["10_ea_rt_daily_archive<br/>23:00 UTC daily<br/>1. land yesterday's file<br/>2. release that day from live<br/>3. register new measures"]
+    end
+
+    J23 --> LIVE[("ea_rt_readings_live<br/>the last one to four days")]
+    J10 -- "land day D" --> BRONZE[("ea_rt_readings_bronze<br/>the record, by day")]
+    J10 -. "release day D" .-> LIVE
+
+    LIVE --> LATEST["ea_rt_latest (view)<br/>newest reading per measure"]
+    LIVE --> ALL["ea_rt_readings_all (view)<br/>archive plus live tail,<br/>bronze wins for any day it holds"]
+    BRONZE --> ALL
+
+    LATEST --> APP(["Hydrometric app<br/>map colours from latest,<br/>charts from the combined series"])
+    ALL --> APP
+```
+
+Where each day lives, with Monday as the day in question:
+
+| When | Saturday | Sunday | Monday | Tuesday |
+|---|---|---|---|---|
+| Tuesday 10:00 | bronze | bronze | live | live (so far) |
+| Tuesday after 23:00 | bronze | bronze | bronze (released from live) | live (so far) |
+
+`ea_rt_readings_all` never shows a reading twice. A live row is dropped for any day
+bronze holds, and also when bronze holds the same measure and reading time, because
+bronze files a row under the archive file's date, which can differ from the reading's
+own date at a day boundary. `source` says which table a row came from. Join to
+`ea_rt_measure_register` or `ea_rt_stations` on `measure_uri` for station details.
+
+Schedule: step 0 of Master_polling runs it every poll. For 15-minute readings without
+running the whole polling run that often, schedule `jobs/23_ea_rt_live_readings` on its
+own every 15 minutes, or unpause `ea_rt_live_workflow`. It skips itself if the table
+was filled in the last 10 minutes, so the schedules cannot double-call the API. Show
+the Open Government Licence attribution wherever the readings are displayed.
 
 ### Weekly (Sunday 02:00 UTC) and quarterly (or after an election)
 

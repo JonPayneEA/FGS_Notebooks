@@ -742,6 +742,67 @@ def areas_under_forecast_sentence(n_warning: int, n_alert: int, risk_name: str, 
     return (f"{subject} {'lies' if total == 1 else 'lie'} under the forecast {risk_name}{source_text} "
             f"flood risk. {lead} where the Environment Agency could issue {issue} if the risk is realised.")
 
+def parse_reading_value(raw):
+    """
+    One EA reading value as a float, or None. The real-time API is not consistent: a
+    value can be a number, a numeric string, a list, or a string holding two values
+    joined by "|" (some measures report a pair). The first value is used. Booleans,
+    blanks, text and non-finite numbers give None, so a bad reading is a gap and
+    never a wrong number.
+    """
+    if isinstance(raw, (list, tuple)):
+        raw = raw[0] if raw else None
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        v = float(raw)
+    else:
+        text = str(raw).strip().split("|")[0].strip()
+        if not text:
+            return None
+        try:
+            v = float(text)
+        except ValueError:
+            return None
+    if v != v or v in (float("inf"), float("-inf")):
+        return None
+    return v
+
+
+def reading_rows_from_items(items: list, ingested_at) -> list:
+    """
+    Turn the items of the EA latest-readings response into rows for the live table:
+    measure_uri, date_time (UTC), reading_date, value, ingested_at.
+
+    An item with no measure or no readable time is skipped. A value that cannot be
+    read is kept as None (the reading exists, the number does not). A reading seen
+    twice (same measure and time) is kept once, the last one winning.
+    """
+    rows = {}
+    for item in items or []:
+        measure = item.get("measure")
+        if isinstance(measure, (list, tuple)):
+            measure = measure[0] if measure else None
+        if isinstance(measure, dict):
+            measure = measure.get("@id")
+        stamp = item.get("dateTime")
+        if not measure or not stamp:
+            continue
+        try:
+            when = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        when = when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+        when = when.astimezone(timezone.utc)
+        rows[(str(measure), when)] = {
+            "measure_uri":  str(measure),
+            "date_time":    when,
+            "reading_date": when.date(),
+            "value":        parse_reading_value(item.get("value")),
+            "ingested_at":  ingested_at,
+        }
+    return list(rows.values())
+
 
 def risk_level_sql(rank_expr: str) -> str:
     """Inverse of risk_rank_sql: rank back to the level text (NULL for 0)."""

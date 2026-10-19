@@ -244,3 +244,59 @@ def test_areas_sentence_singular_and_single_type():
 def test_areas_sentence_joins_several_sources_in_a_stable_order():
     s = areas_under_forecast_sentence(0, 2, "High", ["surface", "river", "ground"])
     assert "forecast High groundwater, river and surface water flood risk" in s
+
+# ---- live readings (job 23) --------------------------------------------------
+
+from datetime import datetime, timezone  # noqa: E402
+from utils.helpers import parse_reading_value, reading_rows_from_items  # noqa: E402
+
+
+def test_reading_value_accepts_the_shapes_the_api_returns():
+    assert parse_reading_value(1.25) == 1.25
+    assert parse_reading_value(3) == 3.0
+    assert parse_reading_value("0.67") == 0.67
+    assert parse_reading_value("0.67|0.54") == 0.67          # a pair: the first value
+    assert parse_reading_value([2.5, 9]) == 2.5
+    assert parse_reading_value(" 4.0 ") == 4.0
+
+
+def test_reading_value_gives_none_for_anything_unreadable():
+    for bad in (None, "", "  ", "n/a", [], True, False, float("nan"), float("inf"), "inf", "nan"):
+        assert parse_reading_value(bad) is None, bad
+
+
+def test_reading_rows_shape_and_utc_time():
+    now = datetime(2026, 10, 19, 9, 20, tzinfo=timezone.utc)
+    items = [{"measure": "http://x/measures/A", "dateTime": "2026-10-19T09:15:00Z", "value": 1.5}]
+    (row,) = reading_rows_from_items(items, now)
+    assert row["measure_uri"] == "http://x/measures/A"
+    assert row["date_time"] == datetime(2026, 10, 19, 9, 15, tzinfo=timezone.utc)
+    assert row["reading_date"].isoformat() == "2026-10-19"
+    assert row["value"] == 1.5 and row["ingested_at"] == now
+
+
+def test_reading_rows_skip_incomplete_items_and_keep_unreadable_values_as_gaps():
+    now = datetime(2026, 10, 19, tzinfo=timezone.utc)
+    items = [
+        {"measure": "m1", "dateTime": "2026-10-19T09:15:00Z", "value": "n/a"},   # time exists, number does not
+        {"measure": None, "dateTime": "2026-10-19T09:15:00Z", "value": 1},       # no measure
+        {"measure": "m2", "dateTime": None, "value": 1},                          # no time
+        {"measure": "m3", "dateTime": "not a time", "value": 1},                  # unreadable time
+        {"measure": {"@id": "m4"}, "dateTime": "2026-10-19T09:15:00+00:00", "value": 2},   # measure as an object
+        {"measure": ["m5"], "dateTime": "2026-10-19T10:15:00+01:00", "value": 3},          # list, and a non-UTC offset
+    ]
+    rows = {r["measure_uri"]: r for r in reading_rows_from_items(items, now)}
+    assert set(rows) == {"m1", "m4", "m5"}
+    assert rows["m1"]["value"] is None
+    assert rows["m5"]["date_time"] == datetime(2026, 10, 19, 9, 15, tzinfo=timezone.utc)   # converted to UTC
+
+
+def test_reading_rows_dedupe_on_measure_and_time_last_wins():
+    now = datetime(2026, 10, 19, tzinfo=timezone.utc)
+    items = [{"measure": "m", "dateTime": "2026-10-19T09:15:00Z", "value": 1},
+             {"measure": "m", "dateTime": "2026-10-19T09:15:00Z", "value": 2},
+             {"measure": "m", "dateTime": "2026-10-19T09:30:00Z", "value": 3}]
+    rows = reading_rows_from_items(items, now)
+    assert len(rows) == 2
+    assert [r["value"] for r in sorted(rows, key=lambda r: r["date_time"])] == [2, 3]
+    assert reading_rows_from_items(None, now) == []
