@@ -32,9 +32,9 @@
 # =============================================================================
 # NOTEBOOK 1: master_polling.py
 # Path:     master/Master_polling
-# Schedule: Every 30 or 60 minutes (all day -- the ingest job applies its own
+# Schedule: Every 15 minutes (all day -- the ingest job applies its own
 #           UTC window from config.py)
-# Cron:     0 0/30 * * * ?
+# Cron:     0 0/15 * * * ?
 #
 # Each step is isolated: a failure in the FGS ingest does not stop the flood
 # warnings ingest. The run still fails at the end so the alert fires.
@@ -52,12 +52,21 @@
 # days late, so this table is the live tail until then; job 10 releases each day from
 # it once that day is archived.
 #
-# AT 30 MINUTES THE READINGS ARE 30 MINUTES APART. The EA API refreshes every 15
-# minutes. For 15-minute readings WITHOUT running the whole polling run that often,
-# schedule jobs/23_ea_rt_live_readings on its own, every 15 minutes
-# (cron 0 0/15 * * * ?). It skips itself if the table was filled in the last 10
-# minutes, so it can sit beside this schedule without calling the API twice.
-# With Workflows, unpause ea_rt_live_workflow instead.
+# CADENCE. Every 15 minutes, because the EA real-time API and the EA flood warnings
+# API both refresh every 15 minutes, so polling less often misses state in between.
+# Every step is idempotent and exits quickly when there is nothing new. The one limit is
+# run length: only one run happens at a time, so a run that takes over 15 minutes
+# causes the next to be skipped, live readings included. Check the run durations in
+# Databricks before going finer, and slacken to 30 minutes if they approach 15.
+#
+# STEP 0 IS NOT FATAL. A live readings failure is printed and shown in the run summary
+# but does not fail the run, so a bad spell at the EA cannot fire the alert that
+# protects the FGS and flood warnings. The ea_live_readings_age check in step 9 warns
+# (never fails) if the newest live reading is over an hour old.
+#
+# To run live readings on their own schedule as well, schedule
+# jobs/23_ea_rt_live_readings directly. It skips itself if the table was filled in the
+# last 10 minutes, so it cannot double-call the API.
 # =============================================================================
 
 
