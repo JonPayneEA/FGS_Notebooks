@@ -139,6 +139,15 @@ TBL_EA_RT_STATIONS      = f"{CATALOG}.{SCHEMA}.ea_rt_stations"
 TBL_EA_RT_STATION_MEASURES = f"{CATALOG}.{SCHEMA}.ea_rt_station_measures"
 TBL_WISKI_LOOKUP        = f"{CATALOG}.{SCHEMA}.ea_rt_wiski_lookup"
 
+# Live readings (job 23). The daily archive (job 10) lands each day's readings about
+# one to two days late, so this table holds the last few days polled from the EA API
+# every 15 to 30 minutes, all sites. A day is released from it once that day's archive
+# is in bronze. The two views read through it: the newest reading per measure, and the
+# archive plus the live tail as one series.
+TBL_EA_RT_LIVE          = f"{CATALOG}.{SCHEMA}.ea_rt_readings_live"
+TBL_EA_RT_LATEST        = f"{CATALOG}.{SCHEMA}.ea_rt_latest"
+TBL_EA_RT_ALL           = f"{CATALOG}.{SCHEMA}.ea_rt_readings_all"
+
 # Products built on the FGS and warning tables (jobs 18 to 22)
 TBL_FGS_CHANGES         = f"{CATALOG}.{SCHEMA}.fgs_constituency_changes"
 TBL_FGS_CHANGES_LOG     = f"{CATALOG}.{SCHEMA}.fgs_changes_log"
@@ -152,6 +161,15 @@ TBL_EA_THRESHOLDS       = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_thresholds_all"
 EXTERNAL_VOLUME  = "shared_external_volume"
 WISKI_LOOKUP_CSV = f"/Volumes/{CATALOG}/{SCHEMA}/{EXTERNAL_VOLUME}/realTime_WISKI_lookup.csv"
 THRESHOLDS_CSV   = f"/Volumes/{CATALOG}/{RESTRICTED_SCHEMA}/{EXTERNAL_VOLUME}/thresholds_Feb.csv"
+
+# -----------------------------------------------------------------------------
+# EA REAL-TIME LIVE READINGS (job 23)
+# One call returns the latest reading for every measure, every site in England.
+# -----------------------------------------------------------------------------
+EA_RT_LATEST_URL        = "https://environment.data.gov.uk/flood-monitoring/data/readings?latest"
+EA_RT_LIVE_PAGE_LIMIT   = 10000   # items per page; the job pages until a short page
+EA_RT_LIVE_MIN_MEASURES = 1000    # fewer than this is a bad response, not a quiet day
+EA_RT_LIVE_KEEP_DAYS    = 4       # safety net if the archive hand-over (job 10) has not run
 
 # -----------------------------------------------------------------------------
 # FFC API

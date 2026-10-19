@@ -46,6 +46,20 @@
 # means missing a potential FGS update. Set a failure alert.
 # =============================================================================
 
+# STEP 0 OF THIS RUN: LIVE READINGS. It fetches the latest EA real-time reading for
+# every measure (every site) into ea_rt_readings_live, first and with a short
+# timeout, so a slow FGS step cannot delay it. The daily archive lands one to two
+# days late, so this table is the live tail until then; job 10 releases each day from
+# it once that day is archived.
+#
+# AT 30 MINUTES THE READINGS ARE 30 MINUTES APART. The EA API refreshes every 15
+# minutes. For 15-minute readings WITHOUT running the whole polling run that often,
+# schedule jobs/23_ea_rt_live_readings on its own, every 15 minutes
+# (cron 0 0/15 * * * ?). It skips itself if the table was filled in the last 10
+# minutes, so it can sit beside this schedule without calling the API twice.
+# With Workflows, unpause ea_rt_live_workflow instead.
+# =============================================================================
+
 
 # =============================================================================
 # NOTEBOOK 2: master_weekly.py
