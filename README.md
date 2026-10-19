@@ -161,6 +161,9 @@ other, never both.
 | `fgs_intersections_log` | Per FGS issue | One row per statement and `geometry_source` once intersected, with the `last_modified_at` it was computed at. |
 | `ea_rt_readings_bronze` | Daily | EA real-time readings, partitioned by `reading_date`. |
 | `ea_rt_measure_register` | Daily (new measures) | One row per measure, enriched from the station API. |
+| `ea_rt_readings_live` | Every poll (23) | The live tail of EA real-time readings, every site: the last few days, polled from the EA API every 15 to 30 minutes. The daily archive lands one to two days late, so this covers the gap. Job 10 releases each day from it once that day is in bronze. |
+| `ea_rt_latest` (view) | Every poll (23) | The newest live reading per measure. A map colours from this. |
+| `ea_rt_readings_all` (view) | Every poll (23) | The archive and the live tail as one series. Bronze wins for any day it holds, so there are no duplicates. `source` says which. |
 | `flood_warnings_current` | Every poll | Live state of EA flood warnings and alerts. |
 | `flood_warnings_log` | Every poll | Append-only log of NEW / SEVERITY_CHANGE / MESSAGE_CHANGE / CLOSED events. |
 | `fgs_constituency_mp_contacts` | Every poll | The latest complete FGS forecast (proactive): one row per geometry, day, source and constituency, with the sitting MP and contact details. |
