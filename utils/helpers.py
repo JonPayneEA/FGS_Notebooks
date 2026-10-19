@@ -697,6 +697,52 @@ def risk_rank_sql(column: str) -> str:
             f"WHEN 'Medium' THEN 3 WHEN 'High' THEN 4 ELSE 0 END")
 
 
+SOURCE_PHRASE = {"river": "river", "coastal": "coastal", "surface": "surface water", "ground": "groundwater"}
+
+
+def areas_under_forecast_sentence(n_warning: int, n_alert: int, risk_name: str, sources) -> str:
+    """
+    One factual sentence for an MP briefing: how many flood warning and flood alert
+    areas sit under the forecast risk. These are POTENTIAL warnings and alerts, places
+    where one could be issued, not ones in force. Returns None when there are none,
+    so the draft says nothing rather than "0 areas".
+
+    Args:
+        n_warning:  Flood warning areas under the worst-risk polygons.
+        n_alert:    Flood alert areas under the worst-risk polygons.
+        risk_name:  The worst risk, for example "Medium".
+        sources:    The flood sources at that risk, for example ["river"].
+    """
+    n_warning, n_alert = int(n_warning or 0), int(n_alert or 0)
+    total = n_warning + n_alert
+    if total == 0:
+        return None
+
+    def count(n, noun):
+        return f"{n} {noun}" + ("" if n == 1 else "s")
+
+    pieces = []
+    if n_warning:
+        pieces.append(count(n_warning, "flood warning area"))
+    if n_alert:
+        pieces.append(count(n_alert, "flood alert area"))
+    subject = " and ".join(pieces)
+
+    names = [SOURCE_PHRASE.get(s, str(s)) for s in sorted(set(sources or []))]
+    if len(names) > 1:
+        source_text = " " + ", ".join(names[:-1]) + " and " + names[-1]
+    elif names:
+        source_text = " " + names[0]
+    else:
+        source_text = ""
+
+    issue = ("a flood alert" if n_warning == 0 else
+             "a flood warning" if n_alert == 0 else "a flood warning or alert")
+    lead = "This is a place" if total == 1 else "These are places"
+    return (f"{subject} {'lies' if total == 1 else 'lie'} under the forecast {risk_name}{source_text} "
+            f"flood risk. {lead} where the Environment Agency could issue {issue} if the risk is realised.")
+
+
 def risk_level_sql(rank_expr: str) -> str:
     """Inverse of risk_rank_sql: rank back to the level text (NULL for 0)."""
     return (f"CASE {rank_expr} WHEN 1 THEN 'Very Low' WHEN 2 THEN 'Low' "

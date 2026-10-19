@@ -215,3 +215,32 @@ def test_risk_level_sql_is_the_inverse_and_has_no_zero_branch():
     for level, rank in (("Very Low", 1), ("Low", 2), ("Medium", 3), ("High", 4)):
         assert f"WHEN {rank} THEN '{level}'" in sql
     assert "ELSE" not in sql        # rank 0 gives NULL, so callers can COALESCE to 'None'
+
+
+# ---- areas under the forecast (MP briefing sentence) -------------------------
+
+from utils.helpers import areas_under_forecast_sentence  # noqa: E402
+
+
+def test_areas_sentence_names_counts_risk_and_source():
+    s = areas_under_forecast_sentence(10, 3, "Medium", ["river"])
+    assert s == ("10 flood warning areas and 3 flood alert areas lie under the forecast Medium river "
+                 "flood risk. These are places where the Environment Agency could issue a flood warning "
+                 "or alert if the risk is realised.")
+
+
+def test_areas_sentence_is_silent_when_there_are_none():
+    assert areas_under_forecast_sentence(0, 0, "Medium", ["river"]) is None
+    assert areas_under_forecast_sentence(None, None, "Medium", []) is None
+
+
+def test_areas_sentence_singular_and_single_type():
+    s = areas_under_forecast_sentence(1, 0, "Low", ["coastal"])
+    assert s.startswith("1 flood warning area lies under the forecast Low coastal flood risk.")
+    assert "This is a place where the Environment Agency could issue a flood warning if" in s
+    assert "alert" not in s
+
+
+def test_areas_sentence_joins_several_sources_in_a_stable_order():
+    s = areas_under_forecast_sentence(0, 2, "High", ["surface", "river", "ground"])
+    assert "forecast High groundwater, river and surface water flood risk" in s
