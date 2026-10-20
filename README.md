@@ -827,6 +827,11 @@ A backfilled draft differs from one made at the time in four ways:
 - **`created_at`** is when the backfill ran. Use `statement_id`, or the issue date in
   the body, to tell which statement a draft is for.
 
+Notebooks 20 and 24 stop with a restart instruction if their Python session holds an
+old `BRIEFING_MIN_RISK_RANK`. Databricks keeps an imported `config.py` until the session
+restarts, so after a Git pull a notebook that was already open would otherwise draft
+against the old threshold. Run `dbutils.library.restartPython()` and run from the top.
+
 To review them, filter on `statement_id` and `status = 'draft'`. The wording is built
 by `utils/briefing.py`, shared with notebook 20 and covered by `tests/test_briefing.py`.
 
