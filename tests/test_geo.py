@@ -85,3 +85,55 @@ def test_statements_to_process_modes():
     assert statements_to_process(current, done, coastal_ids={2}) == [2, 3, 4]    # coastal plus pending
     assert statements_to_process(current, done, coastal_ids=set()) == [3, 4]     # none coastal: pending only
     assert statements_to_process(current, done, True, {2}) == [1, 2, 3, 4]       # recompute_all wins
+
+
+def _areas():
+    return pd.DataFrame({
+        "ea_area_code": ["WA1", "WA2", "FW1", "FW2", "FW3", "FWR", "FWX"],
+        "ea_area_name": ["Alert 1", "Alert 2", "Warn 1", "Warn 2", "Warn 3", "River warn", "Orphan"],
+        "ea_area_type": ["flood_alert", "flood_alert", "flood_warning", "flood_warning", "flood_warning",
+                         "flood_warning", "flood_warning"],
+        "type_code":    ["WAC", "WAC", "FWC", "FWT", "FWC", "FWF", "FWC"],
+        "parent":       ["", "", "WA1", "WA1", "WA2", "WA1", "NOPE"],
+    })
+
+
+def _row(code, kind, poly=1, **extra):
+    base = {"statement_id": 1, "poly_id": poly, "day_index": 2, "ea_area_code": code, "ea_area_name": code,
+            "ea_area_type": kind, "source": "coastal", "risk_level": "Medium", "intersection_pct": None,
+            "link_type": "intersects"}
+    base.update(extra)
+    return base
+
+
+def test_warnings_are_raised_through_their_parent_alert_area():
+    from utils.geo import link_warnings_to_alerts
+    coastal = {"FWC", "WAC", "FWB", "WAB", "FWT", "WAT"}
+    new, unmatched = link_warnings_to_alerts([_row("WA1", "flood_alert")], _areas(), coastal)
+    assert sorted(r["ea_area_code"] for r in new) == ["FW1", "FW2"]       # WA1's children; FW3 belongs to WA2
+    assert all(r["link_type"] == "parent_alert" and r["intersection_pct"] is None for r in new)
+    assert all(r["ea_area_type"] == "flood_warning" and r["risk_level"] == "Medium" and r["poly_id"] == 1 for r in new)
+    assert {r["ea_area_name"] for r in new} == {"Warn 1", "Warn 2"}
+    assert unmatched == 1                                                   # FWX's parent is not a known code
+
+
+def test_only_the_flood_sources_own_warning_types_are_linked():
+    from utils.geo import link_warnings_to_alerts
+    new, _ = link_warnings_to_alerts([_row("WA1", "flood_alert")], _areas(), {"FWC", "WAC"})
+    assert [r["ea_area_code"] for r in new] == ["FW1"]                     # FWT is tidal, FWR is a river warning
+
+
+def test_a_warning_already_found_for_the_polygon_is_not_added_twice():
+    from utils.geo import link_warnings_to_alerts
+    rows = [_row("WA1", "flood_alert"), _row("FW1", "flood_warning")]
+    new, _ = link_warnings_to_alerts(rows, _areas(), {"FWC", "FWT", "WAC"})
+    assert [r["ea_area_code"] for r in new] == ["FW2"]
+    # the same warning under a different polygon is its own row
+    again, _ = link_warnings_to_alerts(rows + [_row("WA1", "flood_alert", poly=2)], _areas(), {"FWC", "FWT", "WAC"})
+    assert sorted((r["poly_id"], r["ea_area_code"]) for r in again) == [(1, "FW2"), (2, "FW1"), (2, "FW2")]
+
+
+def test_a_warning_row_never_raises_anything_and_no_alerts_means_no_links():
+    from utils.geo import link_warnings_to_alerts
+    assert link_warnings_to_alerts([_row("FW1", "flood_warning")], _areas(), {"FWC"})[0] == []
+    assert link_warnings_to_alerts([], _areas(), {"FWC"})[0] == []

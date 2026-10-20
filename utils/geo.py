@@ -60,6 +60,51 @@ def clean_geodataframe(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     return gdf
 
 
+def link_warnings_to_alerts(rows, areas, type_codes):
+    """
+    Extra EA intersection rows for the flood warning areas whose PARENT alert area is already
+    under the forecast.
+
+    A coastal line, even widened, may not reach every flood warning area that sits inside a
+    flagged flood alert area. Each warning area names its parent alert area (the `parent`
+    field of the EA layer), so when an alert area is under a polygon its warning areas are
+    raised too. A warning area already present for the same polygon is not added again.
+
+    Args:
+        rows:       EA intersection rows (dicts) found so far for ONE flood source.
+        areas:      DataFrame of every EA area with ea_area_code, ea_area_name, ea_area_type,
+                    type_code and parent.
+        type_codes: The EA type codes that belong to this flood source. A warning area of any
+                    other type is never linked.
+
+    Returns:
+        (new_rows, unmatched): the added rows, each a copy of its alert area's row with the
+        warning area's code and name, a NULL intersection_pct and link_type "parent_alert";
+        and the number of warning areas of these types whose parent is not any known area
+        code (a sign the parent field does not hold the codes this matches on).
+    """
+    warn = areas[(areas["ea_area_type"] == "flood_warning") & areas["type_code"].isin(type_codes)]
+    warn = warn[warn["parent"].fillna("").astype(str).str.strip() != ""]
+    known = set(areas["ea_area_code"])
+    unmatched = int((~warn["parent"].isin(known)).sum())
+    children = {}
+    for _, w in warn.iterrows():
+        children.setdefault(str(w["parent"]).strip(), []).append((w["ea_area_code"], w["ea_area_name"]))
+    present = {(r["poly_id"], r["ea_area_code"]) for r in rows}
+    new_rows = []
+    for r in rows:
+        if r["ea_area_type"] != "flood_alert":
+            continue
+        for code, name in children.get(r["ea_area_code"], []):
+            if (r["poly_id"], code) in present:
+                continue
+            present.add((r["poly_id"], code))
+            new_rows.append(dict(r, ea_area_code=str(code or ""), ea_area_name=str(name or ""),
+                                 ea_area_type="flood_warning", intersection_pct=None,
+                                 link_type="parent_alert"))
+    return new_rows, unmatched
+
+
 def statements_to_process(current, done, recompute_all=False, coastal_ids=None):
     """
     The statement ids job 07 should intersect, oldest first.

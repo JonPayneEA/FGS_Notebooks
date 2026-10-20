@@ -252,8 +252,8 @@ HEALTH_LIVE_WARN_HOURS     = 1
 # EA flood areas with less than this proportion of their area covered by an
 # FGS polygon are excluded from fgs_ea_area_intersections.
 # Line geometries (coastal polylines) have no area, so the threshold does not
-# apply to them: any positive-length overlap is kept and intersection_pct is
-# NULL.
+# apply to them: any overlap with the widened line (see COASTAL_LINE_BUFFER_M
+# below) is kept and intersection_pct is NULL.
 # Constituency intersections have no percentage threshold, but overlaps
 # smaller than MIN_OVERLAP_AREA_M2 (boundary slivers and touching edges) are
 # ignored.
@@ -261,16 +261,24 @@ HEALTH_LIVE_WARN_HOURS     = 1
 EA_INTERSECTION_MIN_PCT = 0.25   # 25 percent minimum coverage
 MIN_OVERLAP_AREA_M2     = 1.0    # Square metres in EPSG:27700
 
-# Coastal FGS geometries are lines along the coast, and a constituency stops at the
-# coast, so a line on or just off that edge often crosses no constituency at all. For
-# the CONSTITUENCY intersections only, each line is widened by this many metres on each
-# side before the overlap test. The row keeps its line geometry_type and a NULL
-# intersection_pct. 0 turns it off. EA flood areas are tested against the original line.
+# Coastal FGS geometries are lines along the coast. A constituency stops at the coast, and
+# a coastal flood warning or alert area is a polygon beside it, so a line on or just off
+# that edge often crosses neither. Each line is widened by this many metres on each side
+# before the overlap test, for BOTH the constituency and the EA flood area intersections.
+# The row keeps its line geometry_type and a NULL intersection_pct (the EA coverage
+# threshold applies to polygons only). 0 turns it off. Polygons are never widened.
 # After changing it, run 07_compute_intersections with coastal_only = true (only the
 # statements that hold a coastal line are recomputed). New statements use it automatically.
 COASTAL_LINE_BUFFER_M   = 1000
 if COASTAL_LINE_BUFFER_M < 0:
     raise ValueError(f"COASTAL_LINE_BUFFER_M must be 0 or more, not {COASTAL_LINE_BUFFER_M!r}")
+
+# Even widened, a coastal line may not reach every flood warning area inside a flood alert
+# area it does reach. Each flood warning area names its parent alert area, so when True a
+# coastal alert area under the forecast also raises the coastal warning areas whose parent
+# it is (fgs_ea_area_intersections.link_type = 'parent_alert', NULL intersection_pct). Only
+# coastal-source rows are linked. After changing it, run 07 with coastal_only = true.
+COASTAL_LINK_WARNINGS_TO_ALERTS = True
 
 # flood_warning_constituency_contacts: a warning or alert is linked to a
 # constituency when at least this share of the warning AREA lies inside it
