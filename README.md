@@ -800,6 +800,33 @@ WHERE statement_id = (SELECT MAX(statement_id)
 ORDER BY worst_rank DESC;
 ```
 
+#### Reviewing earlier statements: `24_backfill_mp_briefing_drafts`
+
+Notebook 20 drafts for the latest statement only. To go back over earlier ones, run
+`jobs/24_backfill_mp_briefing_drafts` by hand. It rebuilds each statement's picture
+from `fgs_constituency_intersections`, which keeps every statement, and writes drafts
+in the same wording to the same table with `status = 'draft'`. The `statements`
+widget takes `30` (the last 30 complete statements before the latest, the default),
+`all`, or exact ids such as `4811,4812`.
+
+It is safe to re-run. A constituency that already has a row for a statement, in any
+status, is skipped, so a draft that has been edited or moved on is never touched. The
+latest statement is left to notebook 20.
+
+A backfilled draft differs from one made at the time in four ways:
+
+- **Warnings and alerts in force** are not kept historically, so that sentence is left
+  out. The sentence about flood warning and alert areas under the forecast stays, because
+  `fgs_ea_area_intersections` is kept per statement.
+- **The MP** is today's sitting MP for the constituency.
+- **"Higher than in the previous statement"** comes from notebook 18. A statement it
+  never compared leaves the sentence out, and `is_escalation` is null rather than false.
+- **`created_at`** is when the backfill ran. Use `statement_id`, or the issue date in
+  the body, to tell which statement a draft is for.
+
+To review them, filter on `statement_id` and `status = 'draft'`. The wording is built
+by `utils/briefing.py`, shared with notebook 20 and covered by `tests/test_briefing.py`.
+
 ### Exposure history: `fgs_constituency_exposure` (21)
 
 Days each constituency sat at each risk rank, by calendar month and flood source
@@ -962,6 +989,7 @@ ones. See "History is an archive" above.
 │   ├── 21_fgs_constituency_exposure   Days at each risk rank, by month
 │   ├── 22_pipeline_health             Age and completeness checks
 │   ├── 23_ea_rt_live_readings         Live tail of EA real-time readings, every site
+│   ├── 24_backfill_mp_briefing_drafts Drafts for earlier statements, to review after the event (manual)
 │   ├── 12_ea_area_boundaries_download EA administrative boundaries (manual)
 │   ├── 15_rt_station_measure_register All EA stations and measures (manual)
 │   ├── 16_build_wiski_lookup          Measures x WISKI ids from an external CSV (manual)
@@ -1033,7 +1061,8 @@ pytest tests
 
 The tests cover label mapping, geometry-type handling (polygon versus coastal
 polyline), row parsing against the explicit schemas, the coverage and repair logic,
-the live readings parsers (`parse_reading_value`, `reading_rows_from_items`) and the
-briefing sentence about areas under the forecast. They do not need a Spark session or
+the live readings parsers (`parse_reading_value`, `reading_rows_from_items`), the
+briefing sentence about areas under the forecast, and the briefing text and the
+rebuilt per-statement picture behind the backfill (`tests/test_briefing.py`). They do not need a Spark session or
 Databricks. The notebooks themselves, and the SQL in them, are not unit tested: check
 each new one by running it once and reading the output, as the sections above suggest.
