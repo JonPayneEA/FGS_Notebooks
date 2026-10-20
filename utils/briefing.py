@@ -213,3 +213,28 @@ def situation_from_intersections(inter, all_const, mp, escalated_ids, statement_
     out["fgs_statement_id"] = int(statement_id)
     out["fgs_issued_at"] = str(issued_at)
     return out.reset_index(drop=True)
+
+
+def check_setting_is_current(config_path, name, loaded):
+    """
+    Stop a notebook that is running on an out-of-date setting.
+
+    Databricks keeps an imported module until the Python session restarts, so after
+    config.py changes (a Git pull, or an edit) a notebook that was already open still
+    holds the old value and quietly does the wrong thing. This reads the setting's line
+    straight from config.py and raises if it differs from the value the notebook loaded.
+    Nothing happens when the file cannot be read or the line is not a plain number.
+    """
+    try:
+        with open(config_path, encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError:
+        return
+    match = re.search(rf"^{re.escape(name)}\s*=\s*(-?\d+)\s*(?:#.*)?$", text, flags=re.MULTILINE)
+    if not match or int(match.group(1)) == int(loaded):
+        return
+    raise RuntimeError(
+        f"{name} is {match.group(1)} in config.py but this notebook loaded {loaded}: the Python "
+        f"session is holding an old copy. Run dbutils.library.restartPython(), then run the "
+        f"notebook again from the top."
+    )

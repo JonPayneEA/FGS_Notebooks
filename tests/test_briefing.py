@@ -119,3 +119,16 @@ def test_helpers():
     assert optional_bool(None) is None and optional_bool(float("nan")) is None
     assert optional_bool(True) is True and optional_bool(0) is False
     assert day_dates([(2, "2026-10-20")])[1] == date(2026, 10, 19)
+
+
+def test_stale_setting_is_caught(tmp_path):
+    import pytest
+    from utils.briefing import check_setting_is_current
+    cfg = tmp_path / "config.py"
+    cfg.write_text("OTHER = 9\nBRIEFING_MIN_RISK_RANK = 1   # any polygon\n")
+    check_setting_is_current(str(cfg), "BRIEFING_MIN_RISK_RANK", 1)          # current: silent
+    with pytest.raises(RuntimeError, match="restartPython"):
+        check_setting_is_current(str(cfg), "BRIEFING_MIN_RISK_RANK", 3)      # stale: stops
+    check_setting_is_current(str(tmp_path / "missing.py"), "BRIEFING_MIN_RISK_RANK", 3)   # unreadable: silent
+    cfg.write_text("BRIEFING_MIN_RISK_RANK = compute()\n")
+    check_setting_is_current(str(cfg), "BRIEFING_MIN_RISK_RANK", 3)          # not a plain number: silent
