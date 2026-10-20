@@ -3,7 +3,14 @@
 Ingests the Flood Guidance Statement from the FFC API v3, stores it as a
 queryable Delta Lake history, and maintains a set of spatial intersection
 tables linking FGS risk geometries to EA flood areas and parliamentary
-constituencies. It also lands EA real-time flood warnings and river readings.
+constituencies. It also lands EA real-time flood warnings and river readings for
+every site: a daily archive, plus a live tail polled every 15 minutes that covers
+the one to two days before the archive arrives.
+
+On top of those it builds the products people use: what changed since the previous
+statement, one row per constituency (forecast, warnings in force, MP), draft MP
+briefings (never sent), monthly exposure history, and a pipeline health table. The
+whole polling run happens every 15 minutes.
 
 ---
 
@@ -53,7 +60,13 @@ email ffcenquiries@environment-agency.gov.uk (see the FGS Public API documentati
 - `CATALOG` and `SCHEMA` -- where the tables live (currently
   `prd_dash_lab.flood_forecasting_unrestricted`).
 - `SECRET_SCOPE` and `SECRET_KEY` -- only if you used different names for the secret.
-- `POLL_START_HOUR` / `POLL_END_HOUR` -- the polling window, in UTC.
+- `POLL_START_HOUR` / `POLL_END_HOUR` -- the polling window, in UTC. It applies to
+  the FGS ingest only. Flood warnings and live readings run all day.
+- `WARNING_CONTACT_MIN_PCT` / `FGS_CONTACT_MIN_PCT` -- the share of an area (or of
+  a constituency) that must overlap before a link is written. Also used to count
+  the flood warning and alert areas under the forecast.
+- `EA_RT_LIVE_*` and `HEALTH_LIVE_WARN_HOURS` -- the live readings job and its
+  health check (see "Live readings and the daily archive").
 
 Everything else can be left as is unless an external URL changes.
 
@@ -82,7 +95,10 @@ folder can sit anywhere. Nothing refers to one person's workspace folder.
    otherwise its first run tries to process the whole history inside a 10 minute
    timeout.
 7. For EA real-time data: `jobs/08_ea_rt_archive_back`, then
-   `jobs/09_ea_rt_measure_register`.
+   `jobs/09_ea_rt_measure_register`, then `jobs/23_ea_rt_live_readings` once by
+   hand. That creates `ea_rt_readings_live` and the two views over it; the polling
+   master then keeps it filled. Check it: the live table should hold several
+   thousand distinct measures.
 8. `jobs/14_fgs_constituency_contacts`. It needs the intersections (6) and the MP
    table (3).
 9. `jobs/11_flood_warnings_ingest`, then `jobs/13_warning_constituency_contacts`.
@@ -92,8 +108,12 @@ folder can sit anywhere. Nothing refers to one person's workspace folder.
     forecast and warnings" below): `jobs/18_fgs_changes` (needs at least two
     complete statements, otherwise it exits `no_previous`),
     `jobs/19_constituency_flood_situation`, `jobs/20_mp_briefing_drafts`,
-    `jobs/21_fgs_constituency_exposure`, `jobs/22_pipeline_health`.
-11. Schedule the masters (see `workflows/scheduling_guide.md`).
+    `jobs/21_fgs_constituency_exposure`, `jobs/22_pipeline_health`. On an existing
+    install, run 18 once after updating: it adds the headline count columns to
+    `fgs_changes_log`, and a restart of the Python session is needed first if
+    `config.py` changed (Databricks keeps an imported module until it restarts).
+11. Schedule the masters (see `workflows/scheduling_guide.md`). `Master_polling`
+    every 15 minutes.
 
 ### Starting over on an existing install
 
@@ -109,6 +129,8 @@ recreates the whole statement history, so nothing is lost.
   days, so dropping it loses anything older.
 - `ea_rt_measure_register` is compatible and costs about 15 minutes of API calls to
   rebuild, so there is no reason to drop it.
+- `mp_briefing_drafts`. Rows a person has moved on (`reviewed`, `sent`, `rejected`)
+  record a human decision and cannot be recreated.
 
 **Drop** the FGS-derived tables, then clear the live warnings state (not the log):
 
@@ -123,6 +145,11 @@ DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.fgs_intersectio
 DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.fgs_constituency_mp_contacts;
 DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.flood_warning_constituency_contacts;
 DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.ea_area_constituency_lookup;
+DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.fgs_constituency_changes;
+DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.fgs_changes_log;
+DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.constituency_flood_situation;
+DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.fgs_constituency_exposure;
+DROP TABLE IF EXISTS prd_dash_lab.flood_forecasting_unrestricted.pipeline_health;
 
 -- Clear the live state so the first run does not log a CLOSED event for every
 -- stale warning left over from the old workflow. Do NOT clear flood_warnings_log.
@@ -130,7 +157,9 @@ DELETE FROM prd_dash_lab.flood_forecasting_unrestricted.flood_warnings_current;
 ```
 
 The EA areas, constituencies and MP tables are overwritten in full by their jobs, so
-they do not need dropping. Pause every old schedule first. Then follow the first-time
+they do not need dropping. `ea_rt_readings_live` and its two views can be dropped and
+rebuilt at any time by running `23_ea_rt_live_readings`; it only holds the last few
+days. Pause every old schedule first. Then follow the first-time
 run order below, skipping `08` and `09` because the bronze and register tables
 already exist. Run `Master_polling` once by hand before scheduling the masters.
 
@@ -140,6 +169,12 @@ Schedule the four master notebooks with the Databricks notebook scheduler (see
 `workflows/scheduling_guide.md`), **or** deploy `workflows/databricks_workflows.yml`
 as a bundle (`databricks.yml`) if you have Workflows permissions. Use one or the
 other, never both.
+
+`Master_polling` runs **every 15 minutes**. The EA flood warnings API and the EA
+real-time readings API both refresh every 15 minutes, and every step is idempotent
+and exits quickly when nothing is new. Only one run happens at a time, so a run
+longer than 15 minutes makes the next one skip: check the run durations in
+Databricks, and slacken to 30 minutes if they approach 15.
 
 ---
 
@@ -159,9 +194,9 @@ other, never both.
 | `fgs_ea_area_intersections` | Per FGS issue | FGS geometries (from the source chosen in `FGS_GEOMETRY_SOURCE`, tagged `geometry_source`) intersecting EA areas. Polygons need 25% coverage of the EA area; lines (coastal) have `intersection_pct` NULL. |
 | `fgs_constituency_intersections` | Per FGS issue | FGS geometries intersecting constituencies (any real overlap), tagged `geometry_source`. |
 | `fgs_intersections_log` | Per FGS issue | One row per statement and `geometry_source` once intersected, with the `last_modified_at` it was computed at. |
-| `ea_rt_readings_bronze` | Daily | EA real-time readings, partitioned by `reading_date`. |
+| `ea_rt_readings_bronze` | Daily (10, 23:00 UTC) | EA real-time readings, partitioned by `reading_date`. The archive for a day is generated at 22:00 the day after, so this is one to two days behind: see `ea_rt_readings_live`. |
 | `ea_rt_measure_register` | Daily (new measures) | One row per measure, enriched from the station API. |
-| `ea_rt_readings_live` | Every poll (23) | The live tail of EA real-time readings, every site: the last few days, polled from the EA API every 15 to 30 minutes. The daily archive lands one to two days late, so this covers the gap. Job 10 releases each day from it once that day is in bronze. |
+| `ea_rt_readings_live` | Every poll (23) | The live tail of EA real-time readings, every site: the last few days, polled from the EA API every 15 minutes. The daily archive lands one to two days late, so this covers the gap. Job 10 releases each day from it once that day is in bronze. |
 | `ea_rt_latest` (view) | Every poll (23) | The newest live reading per measure. A map colours from this. |
 | `ea_rt_readings_all` (view) | Every poll (23) | The archive and the live tail as one series. Bronze wins for any day it holds, so there are no duplicates. `source` says which. |
 | `flood_warnings_current` | Every poll | Live state of EA flood warnings and alerts. |
@@ -171,9 +206,9 @@ other, never both.
 | `fgs_changes_log` | Every poll (18) | One row per statement compared, with the number of differences. A zero means the comparison ran and nothing moved on the days both statements cover; no row means 18 has not compared that statement. It also holds `flagged_*` and `medium_plus_*`: how many constituencies each statement flags over all five of its own days, so "30 at Very Low yesterday, none today" shows even when those days have rolled off. |
 | `fgs_constituency_changes` | Every poll (18) | What changed against the previous statement, per constituency, forecast day and flood source. History: rows for each statement are kept. |
 | `constituency_flood_situation` | Every poll (19) | One row per constituency: worst forecast risk and when, risk by day, escalation flag, warnings and alerts in force, and the MP. |
-| `mp_briefing_drafts` | Every poll (20) | DRAFT briefings for MPs whose constituency is forecast at risk. Nothing is sent. `status` starts as `draft`. |
+| `mp_briefing_drafts` | Every poll (20) | DRAFT briefings for MPs whose constituency is forecast at risk, including how many flood warning and alert areas lie under the forecast. Nothing is sent. `status` starts as `draft`. |
 | `fgs_constituency_exposure` | Daily (21) | Days each constituency sat at each risk rank, by calendar month and flood source. Sparse. |
-| `pipeline_health` | Every poll (22) | One row per health check (age and completeness of the outputs), plus an overall row. |
+| `pipeline_health` | Every poll (22) | One row per health check (age and completeness of the outputs, including the age of the live readings), plus an overall row. |
 | `ea_administrative_areas` | Manual | EA and Natural England administrative boundaries. |
 | `ea_rt_stations` | Manual (15) | Every EA real-time station, one row per station, from the stations API. |
 | `ea_rt_station_measures` | Manual (15) | One row per measure, keyed by `stationReference`. |
@@ -316,12 +351,16 @@ flowchart TD
     P5 --> I(["Schedule the four masters"])
 ```
 
-### Polling (Master_polling, every 30 or 60 minutes)
+### Polling (Master_polling, every 15 minutes)
 
 Every step runs on every poll. A failure is recorded and the later steps still
 run, then the notebook raises at the end so the run is marked as failed. The
 exit values (`outside_window`, `no_change`, `no_work`) are normal outcomes, not
-failures.
+failures. The one exception to "a failure is raised at the end" is step 0, the live
+readings: a failure there is printed and shown in the summary but does not fail the
+run, so a bad spell at the EA cannot fire the alert that protects the FGS and
+warnings. The `ea_live_readings_age` health check in step 9 warns, and never fails,
+if the newest live reading is over an hour old.
 
 ```mermaid
 flowchart TD
@@ -395,7 +434,7 @@ flowchart LR
     ARC["EA archive file for day D<br/>generated 22:00 on day D+1"] --> J10
 
     subgraph JOBS["Pipeline jobs"]
-        J23["23_ea_rt_live_readings<br/>every 15 to 30 minutes<br/>1. fetch every measure<br/>2. insert new readings only<br/>3. trim older than 4 days"]
+        J23["23_ea_rt_live_readings<br/>every 15 minutes<br/>1. fetch every measure<br/>2. insert new readings only<br/>3. trim older than 4 days"]
         J10["10_ea_rt_daily_archive<br/>23:00 UTC daily<br/>1. land yesterday's file<br/>2. release that day from live<br/>3. register new measures"]
     end
 
@@ -424,11 +463,25 @@ bronze files a row under the archive file's date, which can differ from the read
 own date at a day boundary. `source` says which table a row came from. Join to
 `ea_rt_measure_register` or `ea_rt_stations` on `measure_uri` for station details.
 
-Schedule: step 0 of Master_polling runs it every poll. For 15-minute readings without
-running the whole polling run that often, schedule `jobs/23_ea_rt_live_readings` on its
-own every 15 minutes, or unpause `ea_rt_live_workflow`. It skips itself if the table
-was filled in the last 10 minutes, so the schedules cannot double-call the API. Show
-the Open Government Licence attribution wherever the readings are displayed.
+Schedule: step 0 of `Master_polling`, so every 15 minutes, which is the rate the EA API
+refreshes. It is not fatal to the run (see "Polling"). If you also want it on its own
+schedule, schedule `jobs/23_ea_rt_live_readings` directly: it skips itself if the table
+was filled in the last 10 minutes, so it cannot double-call the API. Show the Open
+Government Licence attribution wherever the readings are displayed.
+
+A quick check after the first run, and after the first 23:00 archive:
+
+```sql
+-- every site is in: several thousand measures
+SELECT COUNT(*) AS readings, COUNT(DISTINCT measure_uri) AS measures
+FROM prd_dash_lab.flood_forecasting_unrestricted.ea_rt_readings_live;
+
+-- no reading appears twice in the combined series
+SELECT measure_uri, date_time, COUNT(*) AS n
+FROM prd_dash_lab.flood_forecasting_unrestricted.ea_rt_readings_all
+WHERE reading_date >= current_date() - 3
+GROUP BY measure_uri, date_time HAVING COUNT(*) > 1 LIMIT 20;
+```
 
 ### Weekly (Sunday 02:00 UTC) and quarterly (or after an election)
 
@@ -510,6 +563,20 @@ flowchart LR
     STM -->|"07"| LOG["fgs_intersections_log"]
     EAI -.->|"written before"| LOG
     CONI -.->|"written before"| LOG
+    CONI -->|"18"| CHG["fgs_constituency_changes"]
+    CONI -->|"18"| CLOG["fgs_changes_log"]
+    FC -->|"19"| SIT["constituency_flood_situation"]
+    WC -->|"19"| SIT
+    CHG -->|"19"| SIT
+    SIT -->|"20"| BRF["mp_briefing_drafts"]
+    EAI -->|"20, areas under the forecast"| BRF
+    LOOK -->|"20, areas under the forecast"| BRF
+    CONI -->|"21, daily"| EXP["fgs_constituency_exposure"]
+    SIT -->|"22"| HLTH["pipeline_health"]
+    EARTAPI[("EA real-time readings API")] -->|"23, every poll"| LIVE["ea_rt_readings_live"]
+    EARCH[("EA readings archive")] -->|"10, daily"| BRZ["ea_rt_readings_bronze"]
+    LIVE -->|"23"| RTALL["ea_rt_latest and ea_rt_readings_all (views)"]
+    BRZ -->|"23"| RTALL
 ```
 
 There are two contact tables, one for each way of looking at flood risk.
@@ -519,8 +586,15 @@ FGS), so an MP can be told before any warning exists.
 has already issued (`11`), through the spatial lookup (`06`). Both end at the
 sitting MP (`04`). The
 other EA real-time tables are separate: `10` lands `ea_rt_readings_bronze`, `09`
-builds `ea_rt_measure_register` from it, and `11` also appends to
-`flood_warnings_log`.
+builds `ea_rt_measure_register` from it, `23` keeps `ea_rt_readings_live` (the live
+tail over the one to two days before the archive arrives) and the two views that read
+through it, and `11` also appends to `flood_warnings_log`.
+
+The products sit on top: `18` compares the latest two statements into
+`fgs_constituency_changes` and `fgs_changes_log`, `19` folds the forecast, warnings
+and changes into one row per constituency, `20` drafts MP briefings from that and
+from the areas under the forecast, `21` counts exposure by month, and `22` checks the
+age and completeness of it all.
 
 ### How re-runs stay safe
 
@@ -535,6 +609,14 @@ builds `ea_rt_measure_register` from it, and `11` also appends to
 - `07_compute_intersections` deletes a statement's rows before writing them and
   records the statement in `fgs_intersections_log` last. `recompute_all` is
   therefore safe to run as often as you like.
+- `18_fgs_changes` replaces its rows and its `fgs_changes_log` row for the statement,
+  so a re-run never duplicates. `20_mp_briefing_drafts` replaces drafts still marked
+  `draft` and never touches one a person has moved on.
+- `23_ea_rt_live_readings` inserts only readings not already held (a match on measure
+  and reading time), so the same call twice, or two schedules overlapping, never
+  duplicates. `10_ea_rt_daily_archive` releases each archived day from the live table,
+  by day and by measure and time, and does so again if the day was already in bronze.
+  `ea_rt_readings_all` never shows a reading twice: bronze wins for any day it holds.
 
 ---
 
@@ -644,6 +726,25 @@ change. Unchanged cells are not stored. `change_type` is `new`, `escalated`,
 `de_escalated` or `cleared`. Rows for each statement are kept, so the table is a
 history of changes.
 
+Because unchanged cells are not stored, an empty result alone cannot tell "nothing
+moved" from "18 has not run for this statement". So 18 also writes one row per
+compared statement to `fgs_changes_log`, with `n_changes` (zero is a real "nothing
+moved"), the days compared, and a status (`compared` or `no_shared_days`).
+
+The day-by-day rows leave out days the newer statement no longer covers, on purpose:
+a risk on a day that has rolled off is not a change in the forecast. But a forecast
+that goes from 30 constituencies at Very Low to none is a real change in the
+statement, so the log row also holds the headline counts: `flagged_previous` and
+`flagged_new` (constituencies with any risk over all five of each statement's own
+days) and `medium_plus_previous` and `medium_plus_new` (at Medium or above).
+
+```sql
+SELECT statement_id, previous_statement_id, n_changes, status,
+       flagged_previous, flagged_new, medium_plus_previous, medium_plus_new
+FROM prd_dash_lab.flood_forecasting_unrestricted.fgs_changes_log
+ORDER BY statement_id DESC LIMIT 5;
+```
+
 ```sql
 -- escalations in the latest statement, worst first
 SELECT constituency_name, forecast_date, source, previous_rank, new_rank
@@ -724,10 +825,13 @@ One row per check, with `status` of `ok`, `info`, `warn` or `fail`, and an
 `overall` row. The checks measure the age and completeness of what the pipeline
 produces, so a pipeline that has stopped running shows up as well as one that is
 failing: newest statement, statements awaiting intersections, age of
-`constituency_flood_situation`, age of the warnings ingest, unlinked warnings, MP
-and constituency counts, unmatched MPs. Limits are `HEALTH_*` in `config.py`. The
-notebook raises if any check is `fail`, so a scheduled run is marked failed and
-your alerts fire.
+`constituency_flood_situation`, age of the warnings ingest, age of the newest live
+EA reading, unlinked warnings, MP and constituency counts, unmatched MPs. Limits are
+`HEALTH_*` in `config.py`. The notebook raises if any check is `fail`, so a scheduled
+run is marked failed and your alerts fire. The live readings check
+(`ea_live_readings_age`, `HEALTH_LIVE_WARN_HOURS`) warns and never fails: a stale feed
+is usually a bad spell at the EA, and it must not fail the run that carries the FGS
+and warnings alerts.
 
 ### Dashboard
 
@@ -791,6 +895,28 @@ LEFT JOIN prd_dash_lab.flood_forecasting_unrestricted.mp_contact_details m
 WHERE m.member_id IS NULL;
 ```
 
+## Typical query: river levels, now and recent
+
+The latest reading at every station on a river, and the last two days at one gauge.
+Join the readings to the register on `measure_uri` for the station details.
+
+```sql
+-- the latest level reading at each station on one river
+SELECT r.label AS station, r.town, l.date_time, l.value, r.unit_name
+FROM prd_dash_lab.flood_forecasting_unrestricted.ea_rt_latest l
+JOIN prd_dash_lab.flood_forecasting_unrestricted.ea_rt_measure_register r
+  ON r.measure_uri = l.measure_uri
+WHERE r.river_name = 'River Severn' AND r.parameter = 'level'
+ORDER BY r.label;
+
+-- the last two days at one measure, archive and live tail as one series
+SELECT date_time, value, source
+FROM prd_dash_lab.flood_forecasting_unrestricted.ea_rt_readings_all
+WHERE measure_uri = '<a measure_uri from the register>'
+  AND date_time >= current_timestamp() - INTERVAL 2 DAYS
+ORDER BY date_time;
+```
+
 ---
 
 ## After a general election
@@ -835,6 +961,7 @@ ones. See "History is an archive" above.
 │   ├── 20_mp_briefing_drafts          Draft MP briefings (never sent)
 │   ├── 21_fgs_constituency_exposure   Days at each risk rank, by month
 │   ├── 22_pipeline_health             Age and completeness checks
+│   ├── 23_ea_rt_live_readings         Live tail of EA real-time readings, every site
 │   ├── 12_ea_area_boundaries_download EA administrative boundaries (manual)
 │   ├── 15_rt_station_measure_register All EA stations and measures (manual)
 │   ├── 16_build_wiski_lookup          Measures x WISKI ids from an external CSV (manual)
@@ -845,7 +972,7 @@ ones. See "History is an archive" above.
 │   └── Explore_live_readings          Filter and plot the readings, with an archive | live line (by hand)
 ├── dashboards/
 │   └── fgs_flood_situation.lvdash.json  AI/BI dashboard (untested import)
-├── tests/                             pytest suite for the parsing and spatial helpers
+├── tests/                             pytest suite for the parsing, spatial and wording helpers
 └── workflows/
     ├── databricks_workflows.yml       Workflow definitions (optional)
     └── scheduling_guide.md            Notebook scheduler instructions
@@ -905,5 +1032,8 @@ pytest tests
 ```
 
 The tests cover label mapping, geometry-type handling (polygon versus coastal
-polyline), row parsing against the explicit schemas, and the coverage and
-repair logic. They do not need a Spark session or Databricks.
+polyline), row parsing against the explicit schemas, the coverage and repair logic,
+the live readings parsers (`parse_reading_value`, `reading_rows_from_items`) and the
+briefing sentence about areas under the forecast. They do not need a Spark session or
+Databricks. The notebooks themselves, and the SQL in them, are not unit tested: check
+each new one by running it once and reading the output, as the sections above suggest.
