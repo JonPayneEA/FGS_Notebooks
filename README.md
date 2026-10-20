@@ -775,7 +775,10 @@ ORDER BY fgs_worst_rank DESC, severe_warnings DESC, warnings DESC;
 ### MP briefing drafts: `mp_briefing_drafts` (20)
 
 A subject and plain-text body per MP whose constituency reaches
-`BRIEFING_MIN_RISK_RANK` (default 3, Medium) on any of the five days.
+`BRIEFING_MIN_RISK_RANK` (default 1, Very Low: any FGS polygon over the constituency)
+on any of the five days. Set it to 3 to draft only for Medium and above. At 1 a single
+statement can draft for hundreds of constituencies, so a person reviewing them will want
+to sort by `worst_rank`.
 **Nothing is sent.** The wording is factual (what the statement says, which days,
 which sources, whether it has risen), gives no advice, and leaves the sender and
 sign-off as a placeholder. A person reviews each draft and sends it by their own

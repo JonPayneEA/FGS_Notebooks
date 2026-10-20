@@ -217,9 +217,12 @@ if FGS_GEOMETRY_SOURCE not in ("risk_areas", "aoc"):
 # MP BRIEFING DRAFTS (job 20)
 # A draft is written for an MP when the forecast for their constituency reaches
 # this risk rank on any of the five days: 1 Very Low, 2 Low, 3 Medium, 4 High.
+# 1 means any FGS polygon over the constituency, so a statement that is Very Low
+# everywhere still drafts for every constituency with a polygon over it. Raise it to
+# 3 to draft only for Medium and above.
 # Drafts are never sent. They wait in mp_briefing_drafts for a person to review.
 # -----------------------------------------------------------------------------
-BRIEFING_MIN_RISK_RANK = 3
+BRIEFING_MIN_RISK_RANK = 1
 
 if BRIEFING_MIN_RISK_RANK not in (1, 2, 3, 4):
     raise ValueError(f"BRIEFING_MIN_RISK_RANK must be 1 to 4, not {BRIEFING_MIN_RISK_RANK!r}")
