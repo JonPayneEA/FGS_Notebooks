@@ -84,3 +84,26 @@ def test_summary_copes_with_nothing_and_with_no_boundary():
     assert summarise(pd.DataFrame({"date_time": []}), None, now)["readings"] == 0
     s = summarise(pd.DataFrame({"date_time": ["2026-10-19 09:00"]}), None, now)
     assert s["live"] == 0 and s["archive"] == 1
+
+
+def test_generic_station_names_are_made_unique():
+    reg = pd.DataFrame({
+        "measure_uri": [f"http://x/measures/{i}-rainfall" for i in range(3)],
+        "station_uri": [f"http://x/stations/{i}" for i in range(3)],
+        "station_reference": ["A1", "B2", "C3"],
+        "station_label": ["Rainfall station"] * 3,
+        "parameter": ["rainfall"] * 3, "qualifier": ["Tipping Bucket Raingauge"] * 3,
+        "unit_name": ["mm"] * 3,
+    })
+    out = prepare_register(reg)
+    assert out["station"].is_unique
+    assert out["measure_label"].is_unique
+    assert all("Rainfall station" in s for s in out["station"])
+
+
+def test_unique_names_are_left_alone():
+    reg = pd.DataFrame({
+        "measure_uri": ["m1", "m2"], "station_uri": ["s1", "s2"],
+        "station_label": ["Bewdley", "Hereford"], "parameter": ["level", "level"],
+    })
+    assert list(prepare_register(reg)["station"]) == ["Bewdley", "Hereford"]
