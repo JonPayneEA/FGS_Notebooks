@@ -60,6 +60,31 @@ def clean_geodataframe(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     return gdf
 
 
+def statements_to_process(current, done, recompute_all=False, coastal_ids=None):
+    """
+    The statement ids job 07 should intersect, oldest first.
+
+    Args:
+        current:      {statement_id: last_modified_at} for every statement.
+        done:         {statement_id: last_modified_at} already intersected and logged.
+        recompute_all: Every statement, whether or not it is done.
+        coastal_ids:  When given (coastal_only mode), the ids of statements that hold a line
+                      geometry. Only those are recomputed, even if already done, because
+                      only they can change when COASTAL_LINE_BUFFER_M does. Statements that
+                      have not been intersected at all are still included, so a coastal-only
+                      run never leaves a new statement behind.
+    """
+    if recompute_all:
+        return sorted(current)
+    wanted = set(coastal_ids) if coastal_ids is not None else None
+    ids = []
+    for sid, modified in current.items():
+        pending = done.get(sid) != modified
+        if pending or (wanted is not None and sid in wanted):
+            ids.append(sid)
+    return sorted(ids)
+
+
 def buffer_lines(gdf: gpd.GeoDataFrame, metres: float) -> gpd.GeoDataFrame:
     """
     A copy of `gdf` (in a metric CRS) with every line geometry replaced by its buffer of

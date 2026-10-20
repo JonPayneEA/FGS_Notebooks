@@ -74,3 +74,14 @@ def test_a_buffer_too_small_to_reach_does_not_invent_an_overlap():
     constituency = box(0, 0, 10_000, 10_000)
     far = gpd.GeoDataFrame({"k": [1]}, geometry=[LineString([(-5_000, 0), (-5_000, 10_000)])], crs="EPSG:27700")
     assert coverage(constituency, buffer_lines(far, 1_000).geometry.iloc[0])[0] is False
+
+
+def test_statements_to_process_modes():
+    from utils.geo import statements_to_process
+    current = {1: "a", 2: "b", 3: "c", 4: "d"}
+    done    = {1: "a", 2: "b", 3: "OLD"}                      # 3 was modified since, 4 is new
+    assert statements_to_process(current, done) == [3, 4]                        # normal run
+    assert statements_to_process(current, done, recompute_all=True) == [1, 2, 3, 4]
+    assert statements_to_process(current, done, coastal_ids={2}) == [2, 3, 4]    # coastal plus pending
+    assert statements_to_process(current, done, coastal_ids=set()) == [3, 4]     # none coastal: pending only
+    assert statements_to_process(current, done, True, {2}) == [1, 2, 3, 4]       # recompute_all wins
