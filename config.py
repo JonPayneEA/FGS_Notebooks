@@ -266,7 +266,8 @@ MIN_OVERLAP_AREA_M2     = 1.0    # Square metres in EPSG:27700
 # the CONSTITUENCY intersections only, each line is widened by this many metres on each
 # side before the overlap test. The row keeps its line geometry_type and a NULL
 # intersection_pct. 0 turns it off. EA flood areas are tested against the original line.
-# After changing it, run 07_compute_intersections with recompute_all = true.
+# After changing it, run 07_compute_intersections with coastal_only = true (only the
+# statements that hold a coastal line are recomputed). New statements use it automatically.
 COASTAL_LINE_BUFFER_M   = 1000
 if COASTAL_LINE_BUFFER_M < 0:
     raise ValueError(f"COASTAL_LINE_BUFFER_M must be 0 or more, not {COASTAL_LINE_BUFFER_M!r}")

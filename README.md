@@ -670,8 +670,12 @@ Notes on the table:
   Those rows keep `geometry_type = 'LineString'` and a NULL share, and the original line
   is still what the map draws. EA flood areas are still tested against the line itself.
   Set it to 0 to turn this off. After changing it, run `07_compute_intersections` with
-  `recompute_all = true`, then `14`, `18`, `19`, `20` and `21` again so everything built
-  on the intersections catches up.
+  `coastal_only = true`. That recomputes only the statements that hold a coastal line
+  (plus anything not yet intersected), which is a small share of history, because no other
+  statement can change. `recompute_all = true` still recomputes everything and takes much
+  longer. Then run `14`, `18`, `19`, `20` and `21` again so everything built on the
+  intersections catches up. A normal run needs neither: new statements use the buffer
+  automatically.
 - `mp_matched = false` marks a constituency with no matching MP. The job lists
   them, and fails if no constituency matches any MP.
 - Like the reactive table, it is the current picture, not history: MP details are
