@@ -663,12 +663,15 @@ Notes on the table:
   geometry covers. Links below 1% are not written (`FGS_CONTACT_MIN_PCT` in
   `config.py`). Coastal polylines have no area, so this is NULL and they are
   always kept.
-- **Coastal lines are widened before they are matched to constituencies.** A coastal
-  FGS geometry is a line along the coast, and a constituency stops at the coast, so a
-  line lying on or just off that edge often crosses none. `07` widens each line by
-  `COASTAL_LINE_BUFFER_M` (default 1000 m, each side) for the constituency test only.
-  Those rows keep `geometry_type = 'LineString'` and a NULL share, and the original line
-  is still what the map draws. EA flood areas are still tested against the line itself.
+- **Coastal lines are widened before they are matched to constituencies and to EA flood
+  areas.** A coastal FGS geometry is a line along the coast. A constituency stops at the
+  coast and a coastal flood warning or alert area is a polygon beside it, so a line on or
+  just off that edge often crosses neither, and misses areas it should reach. `07` widens
+  each line by `COASTAL_LINE_BUFFER_M` (default 1000 m, each side) for both tests. Those
+  rows keep `geometry_type = 'LineString'` and a NULL share (the EA coverage threshold
+  applies to polygons only), and the original line is still what the map draws. Polygons
+  are never widened. The EA areas matched are the ones whose type codes belong to the
+  flood source (coastal: FWC, WAC, FWB, WAB, FWT, WAT).
   Set it to 0 to turn this off. After changing it, run `07_compute_intersections` with
   `coastal_only = true`. That recomputes only the statements that hold a coastal line
   (plus anything not yet intersected), which is a small share of history, because no other
