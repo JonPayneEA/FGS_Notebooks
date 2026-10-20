@@ -672,6 +672,19 @@ Notes on the table:
   applies to polygons only), and the original line is still what the map draws. Polygons
   are never widened. The EA areas matched are the ones whose type codes belong to the
   flood source (coastal: FWC, WAC, FWB, WAB, FWT, WAT).
+- **Coastal warning areas are raised through their parent alert area.** Each flood warning
+  area names its parent flood alert area (the EA layer's `parent` field). When a coastal
+  alert area is under the forecast, `07` also writes a row for each coastal warning area
+  whose parent it is, even where the widened line does not reach that warning area.
+  `fgs_ea_area_intersections.link_type` says which: `intersects` (the geometry reached
+  it, and NULL on rows written before the column existed) or `parent_alert` (raised
+  through its parent), and a parent_alert row has a NULL `intersection_pct`. The job prints how many it
+  added, and how many coastal warning areas have a parent that is not a known area code,
+  which would mean the parent field does not hold the codes the link matches on. Only the
+  coastal source is linked, and `COASTAL_LINK_WARNINGS_TO_ALERTS = False` turns it off. To
+  see the effect: `SELECT link_type, COUNT(*) FROM
+  prd_dash_lab.flood_forecasting_unrestricted.fgs_ea_area_intersections WHERE
+  source = 'coastal' GROUP BY link_type`.
   Set it to 0 to turn this off. After changing it, run `07_compute_intersections` with
   `coastal_only = true`. That recomputes only the statements that hold a coastal line
   (plus anything not yet intersected), which is a small share of history, because no other

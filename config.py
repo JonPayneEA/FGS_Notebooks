@@ -273,6 +273,13 @@ COASTAL_LINE_BUFFER_M   = 1000
 if COASTAL_LINE_BUFFER_M < 0:
     raise ValueError(f"COASTAL_LINE_BUFFER_M must be 0 or more, not {COASTAL_LINE_BUFFER_M!r}")
 
+# Even widened, a coastal line may not reach every flood warning area inside a flood alert
+# area it does reach. Each flood warning area names its parent alert area, so when True a
+# coastal alert area under the forecast also raises the coastal warning areas whose parent
+# it is (fgs_ea_area_intersections.link_type = 'parent_alert', NULL intersection_pct). Only
+# coastal-source rows are linked. After changing it, run 07 with coastal_only = true.
+COASTAL_LINK_WARNINGS_TO_ALERTS = True
+
 # flood_warning_constituency_contacts: a warning or alert is linked to a
 # constituency when at least this share of the warning AREA lies inside it
 # (the intersection_pct in ea_area_constituency_lookup). 0.01 means 1 percent:
