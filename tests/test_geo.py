@@ -52,3 +52,25 @@ def test_clean_repairs_bowtie_polygon_and_keeps_lines():
     assert set(cleaned.geom_type) == {"Polygon", "MultiPolygon", "LineString"} & set(cleaned.geom_type)
     assert all(g.is_valid for g in cleaned.geometry)
     assert "LineString" in set(cleaned.geom_type)
+
+
+def test_buffer_lets_a_coastal_line_find_the_constituency_it_runs_beside():
+    import geopandas as gpd
+    from utils.geo import buffer_lines
+    constituency = box(0, 0, 10_000, 10_000)
+    offshore = LineString([(-300, 0), (-300, 10_000)])            # 300 m beyond the coast edge
+    gdf = gpd.GeoDataFrame({"k": [1, 2]}, geometry=[offshore, box(20_000, 0, 21_000, 1_000)], crs="EPSG:27700")
+    assert coverage(constituency, offshore)[0] is False            # the problem
+    wide = buffer_lines(gdf, 500)
+    assert coverage(constituency, wide.geometry.iloc[0])[0] is True
+    assert wide.geometry.iloc[1].equals(gdf.geometry.iloc[1])      # polygons are untouched
+    assert buffer_lines(gdf, 0).geometry.iloc[0].equals(offshore)  # 0 turns it off
+    assert gdf.geometry.iloc[0].geom_type == "LineString"          # the input is not modified
+
+
+def test_a_buffer_too_small_to_reach_does_not_invent_an_overlap():
+    import geopandas as gpd
+    from utils.geo import buffer_lines
+    constituency = box(0, 0, 10_000, 10_000)
+    far = gpd.GeoDataFrame({"k": [1]}, geometry=[LineString([(-5_000, 0), (-5_000, 10_000)])], crs="EPSG:27700")
+    assert coverage(constituency, buffer_lines(far, 1_000).geometry.iloc[0])[0] is False

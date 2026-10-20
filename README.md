@@ -663,6 +663,15 @@ Notes on the table:
   geometry covers. Links below 1% are not written (`FGS_CONTACT_MIN_PCT` in
   `config.py`). Coastal polylines have no area, so this is NULL and they are
   always kept.
+- **Coastal lines are widened before they are matched to constituencies.** A coastal
+  FGS geometry is a line along the coast, and a constituency stops at the coast, so a
+  line lying on or just off that edge often crosses none. `07` widens each line by
+  `COASTAL_LINE_BUFFER_M` (default 1000 m, each side) for the constituency test only.
+  Those rows keep `geometry_type = 'LineString'` and a NULL share, and the original line
+  is still what the map draws. EA flood areas are still tested against the line itself.
+  Set it to 0 to turn this off. After changing it, run `07_compute_intersections` with
+  `recompute_all = true`, then `14`, `18`, `19`, `20` and `21` again so everything built
+  on the intersections catches up.
 - `mp_matched = false` marks a constituency with no matching MP. The job lists
   them, and fails if no constituency matches any MP.
 - Like the reactive table, it is the current picture, not history: MP details are
