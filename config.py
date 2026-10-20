@@ -261,6 +261,16 @@ HEALTH_LIVE_WARN_HOURS     = 1
 EA_INTERSECTION_MIN_PCT = 0.25   # 25 percent minimum coverage
 MIN_OVERLAP_AREA_M2     = 1.0    # Square metres in EPSG:27700
 
+# Coastal FGS geometries are lines along the coast, and a constituency stops at the
+# coast, so a line on or just off that edge often crosses no constituency at all. For
+# the CONSTITUENCY intersections only, each line is widened by this many metres on each
+# side before the overlap test. The row keeps its line geometry_type and a NULL
+# intersection_pct. 0 turns it off. EA flood areas are tested against the original line.
+# After changing it, run 07_compute_intersections with recompute_all = true.
+COASTAL_LINE_BUFFER_M   = 1000
+if COASTAL_LINE_BUFFER_M < 0:
+    raise ValueError(f"COASTAL_LINE_BUFFER_M must be 0 or more, not {COASTAL_LINE_BUFFER_M!r}")
+
 # flood_warning_constituency_contacts: a warning or alert is linked to a
 # constituency when at least this share of the warning AREA lies inside it
 # (the intersection_pct in ea_area_constituency_lookup). 0.01 means 1 percent:

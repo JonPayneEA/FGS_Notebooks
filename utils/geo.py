@@ -60,6 +60,26 @@ def clean_geodataframe(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     return gdf
 
 
+def buffer_lines(gdf: gpd.GeoDataFrame, metres: float) -> gpd.GeoDataFrame:
+    """
+    A copy of `gdf` (in a metric CRS) with every line geometry replaced by its buffer of
+    `metres` on each side. Polygons are left alone. With metres <= 0 nothing changes.
+
+    A coastal FGS "polygon" is really a line along the coast. A constituency is a
+    polygon that stops at the coast, so a line lying on or just off that edge rarely
+    crosses it. Buffering the line gives it a width, so the constituencies it runs
+    beside are found. Use it for finding overlaps only: keep the original line for the
+    geometry type, and report no percentage for it, because the share of a
+    constituency covered by a buffer is not a meaningful number.
+    """
+    gdf = gdf.copy()
+    if metres is None or metres <= 0:
+        return gdf
+    gdf["geometry"] = gdf["geometry"].apply(
+        lambda g: g if g is None or g.geom_type in POLYGONAL else g.buffer(metres))
+    return gdf
+
+
 def coverage(base_geom, other_geom, min_area_m2: float = 1.0):
     """
     Measure how much of `base_geom` (an EA area or constituency polygon, in a
