@@ -13,7 +13,7 @@ from datetime import datetime, timezone, date, timedelta
 import pandas as pd
 from pyspark.sql import SparkSession, Row
 from pyspark.sql.types import (
-    StructType, StructField, StringType, LongType, BooleanType
+    StructType, StructField, StringType, LongType, IntegerType, BooleanType
 )
 
 # =============================================================================
@@ -698,6 +698,29 @@ def risk_rank_sql(column: str) -> str:
 
 
 SOURCE_PHRASE = {"river": "river", "coastal": "coastal", "surface": "surface water", "ground": "groundwater"}
+
+
+# Columns of mp_briefing_drafts. Shared by 20_mp_briefing_drafts and 24_backfill_mp_briefing_drafts.
+BRIEFING_DRAFT_SCHEMA = StructType([
+    StructField("statement_id",       IntegerType(), True),
+    StructField("geometry_source",    StringType(),  True),
+    StructField("constituency_id",    StringType(),  True),
+    StructField("constituency_name",  StringType(),  True),
+    StructField("mp_member_id",       IntegerType(), True),
+    StructField("mp_name",            StringType(),  True),
+    StructField("mp_email",           StringType(),  True),
+    StructField("worst_rank",         IntegerType(), True),
+    StructField("worst_level",        StringType(),  True),
+    StructField("worst_date",         StringType(),  True),
+    StructField("is_escalation",      BooleanType(), True),
+    StructField("has_active_warning", BooleanType(), True),
+    StructField("subject",            StringType(),  True),
+    StructField("body",               StringType(),  True),
+    StructField("status",             StringType(),  True),
+    StructField("reviewed_by",        StringType(),  True),
+    StructField("reviewed_at",        StringType(),  True),
+    StructField("created_at",         StringType(),  True),
+])
 
 
 def areas_under_forecast_sentence(n_warning: int, n_alert: int, risk_name: str, sources) -> str:
