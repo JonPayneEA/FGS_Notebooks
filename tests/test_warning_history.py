@@ -156,3 +156,82 @@ def test_area_type_comes_from_the_code():
     assert area_type("011WAFDW") == "flood_alert" and area_type("012FWFL59A") == "flood_warning"
     assert area_type("011FWCX") == "flood_warning" and area_type("011WATX") == "flood_alert"
     assert area_type("") == "unknown"
+
+
+# --- the live log (flood_warnings_log) -------------------------------------------------
+
+def log_rows(rows):
+    """rows: (area, change_type, severity_level, severity_changed, message_changed, polled)."""
+    return pd.DataFrame({
+        "flood_area_id": [r[0] for r in rows], "change_type": [r[1] for r in rows],
+        "severity_level": [r[2] for r in rows], "time_severity_changed": [r[3] for r in rows],
+        "time_message_changed": [r[4] for r in rows], "ingested_at": [r[5] for r in rows],
+    })
+
+
+def test_log_events_use_the_eas_own_times_and_levels():
+    from utils.warning_history import events_from_log
+    ev, rep = events_from_log(log_rows([
+        ("011FWFNC1D", "NEW", 2, "2026-07-01T09:00:00", None, "2026-07-01T09:20:00"),
+        ("011FWFNC1D", "MESSAGE_CHANGE", 2, "2026-07-01T09:00:00", "2026-07-01T11:00:00", "2026-07-01T11:10:00"),
+        ("011FWFNC1D", "SEVERITY_CHANGE", 1, "2026-07-01T13:00:00", "2026-07-01T13:00:00", "2026-07-01T13:10:00"),
+        ("011FWFNC1D", "SEVERITY_CHANGE", 4, "2026-07-01T20:00:00", "2026-07-01T20:00:00", "2026-07-01T20:10:00"),
+        ("011FWFNC1D", "CLOSED", 4, None, None, "2026-07-02T21:00:00"),            # the 4 was seen: nothing to add
+    ]))
+    assert list(ev["level"]) == ["flood_warning", "flood_warning", "severe_flood_warning", "off"]
+    assert list(ev["time"]) == list(pd.to_datetime(["2026-07-01 09:00", "2026-07-01 11:00", "2026-07-01 13:00", "2026-07-01 20:00"]))
+    assert (ev["origin"] == "flood_warnings_log").all() and rep["closed_fallback"] == 0
+
+
+def test_a_closed_without_a_level_4_is_a_switch_off_at_the_poll_that_noticed():
+    from utils.warning_history import events_from_log, build_history, combine_events
+    ev, rep = events_from_log(log_rows([
+        ("011WAFDW", "NEW", 3, "2026-07-01T09:00:00", None, "2026-07-01T09:20:00"),
+        ("011WAFDW", "CLOSED", 3, None, None, "2026-07-01T15:30:00"),
+    ]))
+    assert rep["closed_fallback"] == 1 and list(ev["kind"]) == ["message", "closed_fallback"]
+    (episodes, periods, _) = build_history(ev)
+    assert episodes.iloc[0]["ended_by"] == "dropped_from_feed" and episodes.iloc[0]["duration_hours"] == 6.5
+    assert periods.iloc[0]["ended_by"] == "dropped_from_feed"
+    assert episodes.iloc[0]["start_origin"] == episodes.iloc[0]["end_origin"] == "flood_warnings_log"
+
+
+def test_the_file_and_the_log_join_into_one_episode_with_both_origins():
+    from utils.warning_history import events_from_log, combine_events
+    file_ev, _ = normalise_messages(raw([("011FWFNC1D", "2026-06-07T08:00:00Z", W)]))
+    log_ev, _ = events_from_log(log_rows([
+        ("011FWFNC1D", "SEVERITY_CHANGE", 4, "2026-06-09T10:00:00", "2026-06-09T10:00:00", "2026-06-09T10:10:00")]))
+    events, dups = combine_events(file_ev, log_ev)
+    ep, per, _ = build_history(events, gap=(pd.Timestamp("2026-06-08"), pd.Timestamp("2026-06-09")))
+    e = ep.iloc[0]
+    assert len(ep) == 1 and e["start_origin"] == "history_file" and e["end_origin"] == "flood_warnings_log"
+    assert e["duration_hours"] == 50.0 and bool(e["spans_gap"])         # it crosses the stretch no source covers
+
+
+def test_a_repeat_in_both_sources_is_kept_once_and_an_episode_inside_one_source_does_not_span_the_gap():
+    from utils.warning_history import events_from_log, combine_events
+    file_ev, _ = normalise_messages(raw([("011FWFNC1D", "2026-06-07T08:00:00Z", W), ("011FWFNC1D", "2026-06-07T12:00:00Z", OFF)]))
+    log_ev, _ = events_from_log(log_rows([
+        ("011FWFNC1D", "NEW", 2, "2026-06-07T08:00:00", None, "2026-06-07T08:20:00")]))      # the same message
+    events, dups = combine_events(file_ev, log_ev)
+    assert dups == 1 and list(events["origin"]) == ["history_file", "history_file"]       # the file's copy wins
+    ep, _, _ = build_history(events, gap=(pd.Timestamp("2026-06-08"), pd.Timestamp("2026-06-09")))
+    assert not bool(ep.iloc[0]["spans_gap"])
+
+
+def test_an_area_still_on_when_the_file_ends_and_never_seen_again_is_open_across_the_gap():
+    from utils.warning_history import combine_events
+    file_ev, _ = normalise_messages(raw([("011FWFNC1D", "2026-06-07T08:00:00Z", W)]))
+    events, _ = combine_events(file_ev)
+    ep, _, _ = build_history(events, as_of=pd.Timestamp("2026-10-20"),
+                             gap=(pd.Timestamp("2026-06-08"), pd.Timestamp("2026-07-01")))
+    assert bool(ep.iloc[0]["is_open"]) and bool(ep.iloc[0]["spans_gap"]) and bool(ep.iloc[0]["stale_open"])
+
+
+def test_bad_log_rows_are_counted():
+    from utils.warning_history import events_from_log
+    ev, rep = events_from_log(log_rows([
+        (None, "NEW", 2, "2026-07-01T09:00:00", None, "2026-07-01T09:20:00"),
+        ("A1FWFX", "NEW", 9, "2026-07-01T09:00:00", None, "2026-07-01T09:20:00"),
+        ("A1FWFX", "NEW", 2, None, None, None)]))
+    assert len(ev) == 0 and rep["no_code"] == 1 and rep["unknown_level"] == 1 and rep["no_time"] == 1

@@ -20,6 +20,11 @@
 #   PERIOD   one run at ONE level inside an episode, so a warning that goes severe
 #            has a flood warning period, a severe flood warning period and a flood
 #            warning period again.
+#
+# TWO SOURCES. The message history file covers the past; flood_warnings_log (job 11) is
+# the live record from when polling began. events_from_log() turns the log into the same
+# kind of event, combine_events() joins the two, and build_history() notes where each
+# episode's start and end came from, and which cross the gap between the two sources.
 # =============================================================================
 
 import pandas as pd
@@ -43,6 +48,9 @@ LEVEL_HEIGHT = {LEVEL_ALERT: 1, LEVEL_WARNING: 2, LEVEL_SEVERE: 3}
 
 # At the same time, a switch off is applied last.
 _TIE_ORDER = {LEVEL_ALERT: 0, LEVEL_WARNING: 1, LEVEL_SEVERE: 2, LEVEL_OFF: 9}
+
+ORIGIN_FILE, ORIGIN_LOG = "history_file", "flood_warnings_log"
+KIND_MESSAGE, KIND_CLOSED = "message", "closed_fallback"
 
 ALERT_TYPE_CODES = {"WAF", "WAT", "WAC", "FAG", "WAB"}
 WARNING_TYPE_CODES = {"FWF", "FWC", "FWG", "FWB", "FWT"}
@@ -113,6 +121,8 @@ def normalise_messages(raw: pd.DataFrame):
     report["disagreeing_levels"] = int((both & (from_text != from_num)).sum())
     df["text"] = raw[text_col].astype("string") if text_col else pd.NA
     df["source"] = raw["Source"].astype("string") if "Source" in raw.columns else pd.NA
+    df["origin"] = ORIGIN_FILE
+    df["kind"] = KIND_MESSAGE
 
     no_code = df["ea_area_code"].isna() | (df["ea_area_code"] == "")
     no_time = df["time"].isna()
@@ -133,11 +143,82 @@ def normalise_messages(raw: pd.DataFrame):
     return df.reset_index(drop=True), report
 
 
+def _naive_utc(series: pd.Series) -> pd.Series:
+    return pd.to_datetime(series, errors="coerce", utc=True).dt.tz_localize(None)
+
+
+def events_from_log(log: pd.DataFrame):
+    """
+    Events from flood_warnings_log (job 11), in the same form as normalise_messages.
+
+    The log has one row each time the live feed changed for an area:
+      NEW, SEVERITY_CHANGE  a level in force from time_severity_changed (the EA's own time),
+                            or the poll time if that is missing. Level 4 is "no longer in force".
+      MESSAGE_CHANGE        the same level with new text: an update, at time_message_changed.
+      CLOSED                the area left the feed. If its last level was 4 the end is already
+                            recorded; if not (the 4 was never seen) it is a switch off at the
+                            poll that noticed, marked closed_fallback.
+
+    Returns:
+        (events, report): events with ea_area_code, time, level, text, source, origin and kind,
+        and counts: rows, no_code, no_time, unknown_level, closed_fallback.
+    """
+    report = {"rows": int(len(log))}
+    df = pd.DataFrame({
+        "ea_area_code": log["flood_area_id"].astype("string").str.strip(),
+        "level": pd.to_numeric(log["severity_level"], errors="coerce").map(NUMBER_TO_LEVEL),
+        "change_type": log["change_type"].astype("string").str.upper(),
+    })
+    sev_time = _naive_utc(log["time_severity_changed"]) if "time_severity_changed" in log else pd.Series(pd.NaT, index=log.index)
+    msg_time = _naive_utc(log["time_message_changed"]) if "time_message_changed" in log else pd.Series(pd.NaT, index=log.index)
+    polled = _naive_utc(log["ingested_at"]) if "ingested_at" in log else pd.Series(pd.NaT, index=log.index)
+    is_msg = df["change_type"] == "MESSAGE_CHANGE"
+    is_closed = df["change_type"] == "CLOSED"
+    time = sev_time.where(~is_msg, msg_time)
+    time = time.fillna(polled)
+    time = time.where(~is_closed, polled)            # a CLOSED is when the poll noticed it had gone
+    df["time"] = time
+    df["text"] = df["change_type"]
+    df["source"] = "flood_warnings_log"
+    df["origin"] = ORIGIN_LOG
+    df["kind"] = KIND_MESSAGE
+
+    # A CLOSED whose last level was 4 adds nothing. One whose last level was 1 to 3 is a switch off.
+    fallback = is_closed & df["level"].notna() & (df["level"] != LEVEL_OFF)
+    df.loc[fallback, "level"] = LEVEL_OFF
+    df.loc[fallback, "kind"] = KIND_CLOSED
+    report["closed_fallback"] = int(fallback.sum())
+    skip = is_closed & ~fallback
+
+    no_code = df["ea_area_code"].isna() | (df["ea_area_code"] == "")
+    no_time = df["time"].isna()
+    no_level = df["level"].isna() & ~is_closed
+    report["no_code"] = int(no_code.sum())
+    report["no_time"] = int((no_time & ~no_code).sum())
+    report["unknown_level"] = int((no_level & ~no_code & ~no_time).sum())
+    df = df[~(no_code | no_time | no_level | skip)].copy()
+    return df[["ea_area_code", "time", "level", "text", "source", "origin", "kind"]].reset_index(drop=True), report
+
+
+def combine_events(*frames):
+    """
+    One sorted event list from several (the history file's, then the log's). An exact
+    repeat (the same area, time and level) is kept once, from the earlier frame.
+    Returns (events, duplicates).
+    """
+    df = pd.concat([f for f in frames if f is not None and len(f)], ignore_index=True)
+    before = len(df)
+    df = df.drop_duplicates(subset=["ea_area_code", "time", "level"], keep="first")
+    df["_tie"] = df["level"].map(_TIE_ORDER)
+    df = df.sort_values(["ea_area_code", "time", "_tie"], kind="mergesort").drop(columns="_tie")
+    return df.reset_index(drop=True), before - len(df)
+
+
 def _minutes(start, end) -> float:
     return round((end - start).total_seconds() / 60.0, 2)
 
 
-def build_history(events: pd.DataFrame, as_of=None):
+def build_history(events: pd.DataFrame, as_of=None, gap=None):
     """
     Episodes and periods from the clean events of `normalise_messages`.
 
@@ -145,12 +226,16 @@ def build_history(events: pd.DataFrame, as_of=None):
         events: ea_area_code, time, level, sorted by area then time.
         as_of:  The end of the data. Anything still in force then is open, and its
                 duration is measured to here. Defaults to the latest event time.
+        gap:    (start, end) of a stretch no source covers, such as the time between the end of
+                the history file and the start of the log. Episodes that start before it and
+                end after it (or never end) are marked spans_gap.
 
     Returns:
         (episodes, periods, stats). Episodes have one row per run in force: episode_id,
         ea_area_code, area_type, start_time, end_time (null while open), duration_minutes,
         duration_hours, start_level, peak_level, had_severe, severe_minutes,
-        n_severe_periods, n_messages, ended_by, is_open, stale_open. Periods have one row per
+        n_severe_periods, n_messages, ended_by (no_longer_in_force, dropped_from_feed or open),
+        is_open, stale_open, start_origin, end_origin, spans_gap. Periods have one row per
         run at one level: period_id, episode_id, ea_area_code, level, start_time, end_time,
         duration_minutes, duration_hours, started_by, ended_by, is_open. stats counts the
         off messages that had nothing to switch off (orphan_off).
@@ -165,13 +250,16 @@ def build_history(events: pd.DataFrame, as_of=None):
 
     for code, g in events.groupby("ea_area_code", sort=False):
         ep, per, n_per = None, None, 0
-        for t, lvl in zip(g["time"], g["level"]):
+        origins = g["origin"] if "origin" in g else pd.Series(ORIGIN_FILE, index=g.index)
+        kinds = g["kind"] if "kind" in g else pd.Series(KIND_MESSAGE, index=g.index)
+        for t, lvl, origin, kind in zip(g["time"], g["level"], origins, kinds):
             if lvl == LEVEL_OFF:
                 if ep is None:
                     orphan_off += 1
                     continue
-                close_period(per, t, "no_longer_in_force")
-                ep["end_time"], ep["ended_by"] = t, "no_longer_in_force"
+                how = "dropped_from_feed" if kind == KIND_CLOSED else "no_longer_in_force"
+                close_period(per, t, how)
+                ep["end_time"], ep["ended_by"], ep["end_origin"] = t, how, origin
                 episodes.append(ep)
                 ep = per = None
                 continue
@@ -180,9 +268,10 @@ def build_history(events: pd.DataFrame, as_of=None):
                 n_per = 1
                 ep = {"episode_id": f"{code}_{t:%Y%m%dT%H%M}", "ea_area_code": code, "area_type": area_type(code),
                       "start_time": t, "start_level": lvl, "peak_level": lvl, "n_messages": 1,
-                      "severe_minutes": 0.0, "n_severe_periods": 0, "had_severe": False}
+                      "severe_minutes": 0.0, "n_severe_periods": 0, "had_severe": False,
+                      "start_origin": origin, "end_origin": None}
                 per = {"period_id": f"{ep['episode_id']}_{n_per}", "episode_id": ep["episode_id"], "ea_area_code": code,
-                       "level": lvl, "start_time": t, "started_by": "issued"}
+                       "level": lvl, "start_time": t, "started_by": "issued", "start_origin": origin}
             else:
                 ep["n_messages"] += 1
                 if lvl != per["level"]:
@@ -191,7 +280,7 @@ def build_history(events: pd.DataFrame, as_of=None):
                     close_period(per, t, change)
                     n_per += 1
                     per = {"period_id": f"{ep['episode_id']}_{n_per}", "episode_id": ep["episode_id"], "ea_area_code": code,
-                           "level": lvl, "start_time": t, "started_by": change}
+                           "level": lvl, "start_time": t, "started_by": change, "start_origin": origin}
                     if LEVEL_HEIGHT[lvl] > LEVEL_HEIGHT[ep["peak_level"]]:
                         ep["peak_level"] = lvl
             if lvl == LEVEL_SEVERE:
@@ -200,16 +289,16 @@ def build_history(events: pd.DataFrame, as_of=None):
         if ep is not None:                                   # still in force when the data ends
             per["end_time"], per["ended_by"] = None, "open"
             periods.append(per)
-            ep["end_time"], ep["ended_by"] = None, "open"
+            ep["end_time"], ep["ended_by"], ep["end_origin"] = None, "open", None
             episodes.append(ep)
 
     ep_df = pd.DataFrame(episodes)
     per_df = pd.DataFrame(periods)
     cols_ep = ["episode_id", "ea_area_code", "area_type", "start_time", "end_time", "duration_minutes", "duration_hours",
                "start_level", "peak_level", "had_severe", "severe_minutes", "n_severe_periods", "n_messages",
-               "ended_by", "is_open", "stale_open"]
+               "ended_by", "is_open", "stale_open", "start_origin", "end_origin", "spans_gap"]
     cols_per = ["period_id", "episode_id", "ea_area_code", "level", "start_time", "end_time", "duration_minutes",
-                "duration_hours", "started_by", "ended_by", "is_open"]
+                "duration_hours", "started_by", "ended_by", "is_open", "start_origin"]
     if per_df.empty:
         return (pd.DataFrame(columns=cols_ep), pd.DataFrame(columns=cols_per), {"orphan_off": orphan_off})
 
@@ -227,4 +316,8 @@ def build_history(events: pd.DataFrame, as_of=None):
     ep_df["n_severe_periods"] = ep_df["episode_id"].map(sev["count"]).fillna(0).astype(int)
     # Open for over 30 days before the data ends: probably a missing "no longer in force".
     ep_df["stale_open"] = ep_df["is_open"] & ((as_of - ep_df["start_time"]) > pd.Timedelta(days=30))
+    if gap is not None and not pd.isna(gap[0]) and not pd.isna(gap[1]) and gap[1] > gap[0]:
+        ep_df["spans_gap"] = (ep_df["start_time"] <= gap[0]) & (ep_df["end_time"].isna() | (ep_df["end_time"] >= gap[1]))
+    else:
+        ep_df["spans_gap"] = False
     return ep_df[cols_ep], per_df[cols_per], {"orphan_off": orphan_off}
