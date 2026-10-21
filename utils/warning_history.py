@@ -321,3 +321,30 @@ def build_history(events: pd.DataFrame, as_of=None, gap=None):
     else:
         ep_df["spans_gap"] = False
     return ep_df[cols_ep], per_df[cols_per], {"orphan_off": orphan_off}
+
+
+def should_skip_rebuild(built_at, log_through, log_latest, now, fresh_minutes) -> bool:
+    """
+    Whether a scheduled rebuild can be skipped: the tables were built less than
+    `fresh_minutes` ago AND the log has nothing newer than what that build used.
+
+    A scheduled run every 15 minutes would otherwise replay the whole history on every poll
+    although flood_warnings_log only gains rows when something changes. The age limit still
+    forces a rebuild every `fresh_minutes`, so the open episodes' durations keep growing.
+
+    Args:
+        built_at:    When the tables were last built (None if never).
+        log_through: The latest log poll that build used (None if unknown or the log was not used).
+        log_latest:  The latest poll in the log now (None if there is no log).
+        now:         The current time.
+        fresh_minutes: 0 or less never skips.
+    """
+    if fresh_minutes is None or fresh_minutes <= 0 or built_at is None or pd.isna(built_at):
+        return False
+    if (pd.Timestamp(now) - pd.Timestamp(built_at)) >= pd.Timedelta(minutes=fresh_minutes):
+        return False
+    if log_latest is None or pd.isna(log_latest):
+        return True                                   # no log to be newer than the build
+    if log_through is None or pd.isna(log_through):
+        return False                                  # an older build with no record of the log
+    return pd.Timestamp(log_latest) <= pd.Timestamp(log_through)

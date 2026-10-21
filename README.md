@@ -202,8 +202,8 @@ Databricks, and slacken to 30 minutes if they approach 15.
 | `flood_warnings_current` | Every poll | Live state of EA flood warnings and alerts. |
 | `flood_warnings_log` | Every poll | Append-only log of NEW / SEVERITY_CHANGE / MESSAGE_CHANGE / CLOSED events. |
 | `ea_warning_messages_history` | Once (25, with `source_path`) | The EA message history file, cleaned and stored once. A closed record: it does not change. |
-| `ea_warning_episodes` | Daily (25) | Each run of a flood alert, flood warning or severe flood warning in force in an area, with start, end and duration, from the EA message history and `flood_warnings_log`. |
-| `ea_warning_periods` | Daily (25) | Each run at one level inside an episode, so a warning that goes severe has three periods. |
+| `ea_warning_episodes` | Every poll, at most hourly (25) | Each run of a flood alert, flood warning or severe flood warning in force in an area, with start, end and duration, from the EA message history and `flood_warnings_log`. |
+| `ea_warning_periods` | Every poll, at most hourly (25) | Each run at one level inside an episode, so a warning that goes severe has three periods. |
 | `fgs_constituency_mp_contacts` | Every poll | The latest complete FGS forecast (proactive): one row per geometry, day, source and constituency, with the sitting MP and contact details. |
 | `flood_warning_constituency_contacts` | Every poll | Current warnings and alerts, one row per constituency each overlaps, with the sitting MP and contact details. |
 | `fgs_changes_log` | Every poll (18) | One row per statement compared, with the number of differences. A zero means the comparison ran and nothing moved on the days both statements cover; no row means 18 has not compared that statement. It also holds `flagged_*` and `medium_plus_*`: how many constituencies each statement flags over all five of its own days, so "30 at Very Low yesterday, none today" shows even when those days have rolled off. |
@@ -420,8 +420,6 @@ flowchart TD
     M(["Master_daily run"]) --> A
     M --> X1["21_fgs_constituency_exposure<br/>(independent of the archive)"]
     X1 --> X2["Rebuild constituency x month x source exposure<br/>Exit success"]
-    M --> W1["25_warning_history_periods<br/>(non-fatal, independent)"]
-    W1 --> W2["Rebuild alert and warning episodes and periods from the<br/>stored message history and flood_warnings_log"]
 ```
 
 ### Live readings and the daily archive
@@ -978,14 +976,21 @@ A message at the level an area is already at is an update and changes nothing.
 **Loading and scheduling.** The history file is a closed record and does not change, so it is
 loaded once. Run the notebook by hand the first time with the `source_path` widget set to the
 parquet file or folder: it checks the file and stores the clean messages in
-`ea_warning_messages_history`. After that, leave `source_path` blank. `Master_daily` runs the
-notebook every night (step 3) with no path, rebuilding both tables from that stored history
-plus `flood_warnings_log`, so new data reaches the tables only through the log. Step 3 is
-non-fatal: a failure is printed and shown in the run summary but does not fail the daily run,
-so read the summary if the tables stop updating. Each run overwrites both tables in full, so a
-re-run gives the same answer, and it touches nothing else. To reload the file (a corrected
-version, say), run it by hand with `source_path` set again.
-`utils/warning_history.py` holds the rules and is covered by `tests/test_warning_history.py`.
+`ea_warning_messages_history`. After that, leave `source_path` blank. New data reaches the
+tables only through `flood_warnings_log`, which step 4 of `Master_polling` updates every 15
+minutes, so `Master_polling` runs this notebook as its last step (step 10) with
+`skip_if_fresh_minutes = 60`. It skips itself when the tables were built less than an hour
+ago and the log has no poll newer than that build. The log only gains rows when something
+changes, so quiet polls cost one small query, and the age limit still rebuilds hourly so the
+duration of anything still in force keeps growing. Open durations are measured to the latest
+poll, not just the latest message.
+
+Step 10 is non-fatal: a failure is printed and shown in the run summary but does not fail the
+polling run that carries the FGS and warnings alerts, so read the summary if the tables stop
+updating. Its run time counts toward the 15 minute cycle, so the notebook prints how long it
+took: check that, and raise the skip window or move it to `Master_daily` if it grows. A
+rebuild overwrites both tables in full, so a re-run gives the same answer. To reload the file
+(a corrected version, say), run it by hand with `source_path` set again.
 
 ```sql
 -- Longest warnings, and how much of each was severe.

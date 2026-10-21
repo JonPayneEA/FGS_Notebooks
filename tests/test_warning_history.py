@@ -235,3 +235,18 @@ def test_bad_log_rows_are_counted():
         ("A1FWFX", "NEW", 9, "2026-07-01T09:00:00", None, "2026-07-01T09:20:00"),
         ("A1FWFX", "NEW", 2, None, None, None)]))
     assert len(ev) == 0 and rep["no_code"] == 1 and rep["unknown_level"] == 1 and rep["no_time"] == 1
+
+
+
+def test_a_scheduled_rebuild_is_skipped_only_when_fresh_and_the_log_has_nothing_new():
+    from utils.warning_history import should_skip_rebuild
+    now = pd.Timestamp("2026-10-21 12:00")
+    built = pd.Timestamp("2026-10-21 11:30")
+    through = pd.Timestamp("2026-10-21 11:15")
+    assert should_skip_rebuild(built, through, pd.Timestamp("2026-10-21 11:15"), now, 60)        # fresh, nothing new
+    assert not should_skip_rebuild(built, through, pd.Timestamp("2026-10-21 11:45"), now, 60)    # a new log poll
+    assert not should_skip_rebuild(pd.Timestamp("2026-10-21 10:30"), through, through, now, 60)  # built 90 minutes ago
+    assert not should_skip_rebuild(built, through, through, now, 0)                              # skipping is off
+    assert not should_skip_rebuild(None, None, through, now, 60)                                 # never built
+    assert not should_skip_rebuild(built, None, through, now, 60)                                # an older build, log use unknown
+    assert should_skip_rebuild(built, None, None, now, 60)                                       # no log in play, fresh

@@ -169,6 +169,24 @@ resources:
           existing_cluster_id: ${var.cluster_id}
           timeout_seconds: 300
 
+        # Start, end and duration of every alert and warning, from the stored message history
+        # and flood_warnings_log. Last, so it never delays the FGS and warnings steps, and it
+        # skips itself when built less than an hour ago and the log has nothing newer. Needs
+        # its one-off load first: run 25_warning_history_periods by hand once with source_path
+        # set. Master_polling runs this step as non-fatal; as a task here its failure fails the
+        # run, so remove it from any alerting that should only watch the FGS path.
+        - task_key: "warning_history"
+          description: "Episodes and periods of alerts and warnings, with start, end and duration"
+          depends_on:
+            - task_key: "flood_warnings"
+          run_if: ALL_DONE
+          notebook_task:
+            notebook_path: "../jobs/25_warning_history_periods.ipynb"
+            base_parameters:
+              skip_if_fresh_minutes: "60"
+          existing_cluster_id: ${var.cluster_id}
+          timeout_seconds: 600
+
 
     # -------------------------------------------------------------------------
     # WORKFLOW 2: WEEKLY REFRESH
