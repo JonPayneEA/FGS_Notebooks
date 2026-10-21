@@ -108,6 +108,12 @@
 # Lands yesterday's EA real-time archive file. The file for a day is generated
 # at 22:00 the following day, so do not schedule this earlier. If the file is
 # not there the run FAILS (exit "no_file"): re-run it later.
+#
+# It also runs 21 (exposure history) and, as a non-fatal step 3, 25
+# (warning and alert history), which rebuilds ea_warning_episodes and
+# ea_warning_periods from ea_warning_messages_history and flood_warnings_log.
+# Run 25 by hand ONCE first, with its source_path widget set, to load the
+# message history file; after that the nightly run needs no path.
 # =============================================================================
 
 
