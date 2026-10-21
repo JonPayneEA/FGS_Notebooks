@@ -201,6 +201,8 @@ Databricks, and slacken to 30 minutes if they approach 15.
 | `ea_rt_readings_all` (view) | Every poll (23) | The archive and the live tail as one series. Bronze wins for any day it holds, so there are no duplicates. `source` says which. |
 | `flood_warnings_current` | Every poll | Live state of EA flood warnings and alerts. |
 | `flood_warnings_log` | Every poll | Append-only log of NEW / SEVERITY_CHANGE / MESSAGE_CHANGE / CLOSED events. |
+| `ea_warning_episodes` | Manual (25) | Each run of a flood alert, flood warning or severe flood warning in force in an area, with start, end and duration, from the EA message history. |
+| `ea_warning_periods` | Manual (25) | Each run at one level inside an episode, so a warning that goes severe has three periods. |
 | `fgs_constituency_mp_contacts` | Every poll | The latest complete FGS forecast (proactive): one row per geometry, day, source and constituency, with the sitting MP and contact details. |
 | `flood_warning_constituency_contacts` | Every poll | Current warnings and alerts, one row per constituency each overlaps, with the sitting MP and contact details. |
 | `fgs_changes_log` | Every poll (18) | One row per statement compared, with the number of differences. A zero means the comparison ran and nothing moved on the days both statements cover; no row means 18 has not compared that statement. It also holds `flagged_*` and `medium_plus_*`: how many constituencies each statement flags over all five of its own days, so "30 at Very Low yesterday, none today" shows even when those days have rolled off. |
@@ -918,6 +920,57 @@ plain query you can paste into a new dashboard. A map is not included. To add on
 join `constituency_flood_situation` to `parliamentary_constituencies` on
 `constituency_id` and use the `geometry` column.
 
+## Warning and alert history: how long was each in force?
+
+`flood_warnings_log` only began when the polling job did. For the years before that,
+`jobs/25_warning_history_periods` builds the same picture from a file of every message the
+EA has issued (a parquet file in a Databricks volume, one row per message with the area
+code `TACode`, the time `dateTime` and the severity text). It writes two tables, each with
+start, end and duration.
+
+The rules are how the EA issues messages, replayed for each area in time order:
+
+| Message | Effect |
+|---|---|
+| Flood alert | Switches an alert on. |
+| Flood warning | Switches a warning on, or turns a severe flood warning down one level. |
+| Severe flood warning | Raises an existing warning to severe. |
+| Warning no longer in force | Switches the area off, from any level. |
+
+A message at the level an area is already at is an update and changes nothing.
+
+- **`ea_warning_episodes`** has one row per run in force at any level, from the message that
+  switched it on to the "no longer in force" that ended it. A warning that goes severe and
+  comes back down is one episode, whose `duration_hours` is the whole time in force.
+  `peak_level`, `had_severe`, `severe_minutes` and `n_severe_periods` say how much of it was
+  severe. `area_type` (flood alert or flood warning) comes from the area code.
+- **`ea_warning_periods`** has one row per run at one level inside an episode, linked by
+  `episode_id`. A warning that goes severe and back has a flood warning period, a severe
+  flood warning period and a flood warning period again. `started_by` and `ended_by` say
+  whether each change was an upgrade or a downgrade.
+- **Open episodes.** Anything with no "no longer in force" by the end of the file has
+  `is_open = true` and no `end_time`, and its duration is measured to the latest message in
+  the file (`data_as_of`). `stale_open` marks those open for over 30 days, which probably
+  lost their end message.
+- **Times** are used as written (`dateTime`, which carries a "Z"). If the source recorded UK
+  clock time and labelled it Z, a duration that spans a clock change is out by an hour.
+- **Checks.** The notebook prints the messages it could not use (no code, no time, an
+  unrecognised severity, exact repeats), any rows where the text and the numeric `severity`
+  disagree, "no longer in force" messages with nothing on, and the median and longest
+  duration by area type. Read these before trusting the tables.
+
+Run it by hand with the `source_path` widget set to the parquet file or folder. It overwrites
+both tables in full, so a re-run gives the same answer, and it touches nothing else.
+`utils/warning_history.py` holds the rules and is covered by `tests/test_warning_history.py`.
+
+```sql
+-- Longest warnings, and how much of each was severe.
+SELECT ea_area_code, start_time, end_time, duration_hours, had_severe, ROUND(severe_minutes / 60, 1) AS severe_hours
+FROM prd_dash_lab.flood_forecasting_unrestricted.ea_warning_episodes
+WHERE area_type = 'flood_warning' AND NOT is_open
+ORDER BY duration_hours DESC LIMIT 20;
+```
+
 ## Typical query: which MPs need to be alerted?
 
 ```sql
@@ -1027,6 +1080,7 @@ ones. See "History is an archive" above.
 │   ├── 22_pipeline_health             Age and completeness checks
 │   ├── 23_ea_rt_live_readings         Live tail of EA real-time readings, every site
 │   ├── 24_backfill_mp_briefing_drafts Drafts for earlier statements, to review after the event (manual)
+│   ├── 25_warning_history_periods     Start, end and duration of every alert and warning, from the message history (manual)
 │   ├── 12_ea_area_boundaries_download EA administrative boundaries (manual)
 │   ├── 15_rt_station_measure_register All EA stations and measures (manual)
 │   ├── 16_build_wiski_lookup          Measures x WISKI ids from an external CSV (manual)
