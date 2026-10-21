@@ -67,6 +67,13 @@
 # To run live readings on their own schedule as well, schedule
 # jobs/23_ea_rt_live_readings directly. It skips itself if the table was filled in the
 # last 10 minutes, so it cannot double-call the API.
+#
+# STEP 10 (WARNING AND ALERT HISTORY, 25) IS NOT FATAL EITHER. It rebuilds
+# ea_warning_episodes and ea_warning_periods from the stored message history and
+# flood_warnings_log, and skips itself (exit "skipped_fresh") when the tables were
+# built less than an hour ago and the log has nothing newer. Run 25 by hand ONCE first,
+# with its source_path widget set, to load the message history file; after that no path
+# is needed. Its run time counts toward the 15 minute cycle, and the notebook prints it.
 # =============================================================================
 
 

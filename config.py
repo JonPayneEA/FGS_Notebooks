@@ -133,6 +133,7 @@ TBL_EA_RT_REGISTER      = f"{CATALOG}.{SCHEMA}.ea_rt_measure_register"
 TBL_FLOOD_WARN_CURRENT  = f"{CATALOG}.{SCHEMA}.flood_warnings_current"
 TBL_FLOOD_WARN_LOG      = f"{CATALOG}.{SCHEMA}.flood_warnings_log"
 TBL_WARNING_CONTACTS    = f"{CATALOG}.{SCHEMA}.flood_warning_constituency_contacts"
+TBL_WARNING_MESSAGES_HISTORY = f"{CATALOG}.{SCHEMA}.ea_warning_messages_history"   # job 25: the message history file, loaded once
 TBL_WARNING_EPISODES    = f"{CATALOG}.{SCHEMA}.ea_warning_episodes"   # job 25: each run in force, any level
 TBL_WARNING_PERIODS     = f"{CATALOG}.{SCHEMA}.ea_warning_periods"    # job 25: each run at one level
 TBL_FGS_CONTACTS        = f"{CATALOG}.{SCHEMA}.fgs_constituency_mp_contacts"
