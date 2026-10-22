@@ -1229,9 +1229,14 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     `no_station`, `no_parameter`, `no_telemetry_id`), a note saying why, and the measure it
     matched. Use only `matched` rows as the link. `fffs_id` is the key to the thresholds.
   - **`ea_rt_measures_mapped`** (a view) is the register with `gauge_name` (the file's
-    `FFFSLocName`), `fffs_id`, `n_fffs_ids`, `wiski_id` and `wiski_parameter` where a measure
-    matched. A measure wanted by two rows takes the lowest ids and counts them.
-  - **`ea_rt_wiski_lookup`** is now a view over the matched rows that carry a WISKI id. It used
+    `FFFSLocName`), `fffs_id`, `n_fffs_ids`, `wiski_id`, `wiski_parameter` and every other column
+    of the file (`parameter_id`, `wiski_xml_*`, `src_<column>`) where a measure matched. A measure
+    wanted by two rows takes the lowest value of each and counts the FFFS ids.
+  - **`ea_rt_wiski_lookup`** is now a view over the matched rows that carry a WISKI id. It keeps
+    the old table's 14 columns, in order, so nothing that reads it breaks, and adds after them
+    every other column of the file (`mapping_id`, `fffs_id`, `fffs_location_name`, `parameter_id`,
+    `wiski_parameter`, `wiski_xml_parameter`, `wiski_xml_qualifier`, `wiski_id_in_file` and
+    `src_<column>`). It used
     to be a table built by joining on station alone, so a flow measure could carry a stage
     gauge's WISKI id. The notebook will not drop the old table unless the `replace_old_table`
     widget is `true`; until then it prints that the table is still the old one.
