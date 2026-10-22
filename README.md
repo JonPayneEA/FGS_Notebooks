@@ -1247,6 +1247,15 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     re-save the column as text. Read the printed counts and every conflict, ambiguity and
     unmatched row before trusting the table.
 
+  - **Finding out why rows did not match.** `explore/Explore_telemetry_mapping` is a read-only
+    notebook. Run it after 16. It shows the rows by status, the matches whose gauge name and
+    station name disagree (a wrong match shows up there first), and for each unmatched status the
+    reason. For `no_station` it looks every row up in `ea_rt_stations` by `RLOIid`, `notation`,
+    `wiskiID` (the file's `WISKI_ID` too), the ID tidied up (case, dashes, leading zeros) and a
+    similar name, and counts what each route would have found, so a matching rule can be chosen on
+    evidence. For `ambiguous` it says whether picking the shortest period would settle it. It also
+    lists the register measures nothing points at. The logic is in `utils/mapping_diagnostics.py`.
+
   ```sql
   -- How the mapping rows matched.
   SELECT match_status, COUNT(*) AS rows
