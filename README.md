@@ -1219,8 +1219,10 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     station and on what is measured. `TelemetryParameter` (Water Level, Rainfall, Flow ...)
     and the `ParameterID` prefix (`H`, `Q`, `P`, `GW` ...) each name a family; the register's
     parameter and qualifier are reduced to the same families. If the two columns disagree the
-    row is a conflict and is not matched. A station with one measure is not matched on the
-    station alone. The rules are in `utils/telemetry_mapping.py`.
+    row is a conflict and is not matched, with one exception: a groundwater gauge is called
+    "Water Level" in `TelemetryParameter` and `GW.obs` in `ParameterID`, and the code is the more
+    specific, so that pair is a groundwater measure, not a conflict. A station with one measure is
+    not matched on the station alone. The rules are in `utils/telemetry_mapping.py`.
   - **`ea_rt_telemetry_mapping`** holds every row and every column of the file. The columns it
     uses by name keep clean names; any other column (a station name, say) is kept as text as
     `src_<column>`, and `wiski_id_in_file` is the WISKI id exactly as the file holds it (the clean
