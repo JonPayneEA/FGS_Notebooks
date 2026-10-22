@@ -211,6 +211,7 @@ Databricks, and slacken to 30 minutes if they approach 15.
 | `constituency_flood_situation` | Every poll (19) | One row per constituency: worst forecast risk and when, risk by day, escalation flag, warnings and alerts in force, and the MP. |
 | `mp_briefing_drafts` | Every poll (20) | DRAFT briefings for MPs whose constituency is forecast at risk, including how many flood warning and alert areas lie under the forecast. Nothing is sent. `status` starts as `draft`. |
 | `fgs_constituency_exposure` | Daily (21) | Days each constituency sat at each risk rank, by calendar month and flood source. Sparse. |
+| `fgs_forecast_verification` | Daily (26) | The forecast risk for each constituency, date and lead day against the alerts and warnings in force. Sparse. |
 | `pipeline_health` | Every poll (22) | One row per health check (age and completeness of the outputs, including the age of the live readings), plus an overall row. |
 | `ea_administrative_areas` | Manual | EA and Natural England administrative boundaries. |
 | `ea_rt_stations` | Manual (15) | Every EA real-time station, one row per station, from the stations API. |
@@ -1000,6 +1001,44 @@ WHERE area_type = 'flood_warning' AND NOT is_open
 ORDER BY duration_hours DESC LIMIT 20;
 ```
 
+## Forecast verification: did the forecast line up with the warnings?
+
+`jobs/26_fgs_forecast_verification` scores the FGS forecast for each constituency against the
+flood alerts and warnings that were in force, and writes `fgs_forecast_verification`. The
+Flood Planning App's Forecast verification tab reads it.
+
+- **Grain.** One row per constituency, forecast date and lead day. Lead 1 is the statement
+  issued on the day itself; lead 5 is the one issued four days before. The statement used for
+  each date is the last issued on its issue date, as in `21`.
+- **Forecast.** `forecast_rank` is the worst rank across flood sources (1 Very Low, 2 Low, 3
+  Medium, 4 High, 0 nothing). Polygons covering under `FGS_CONTACT_MIN_PCT` of the
+  constituency are ignored.
+- **Outcome.** `alerts`, `warnings` and `severe` are the areas in force in the constituency at
+  any point on that date, linked at `WARNING_CONTACT_MIN_PCT`. An area counts once however
+  often it was issued, and once in each constituency it overlaps. An episode open for over 30
+  days (`stale_open`) counts only on its first date. Only dates up to yesterday are scored.
+- **Sparse.** A date with nothing forecast and nothing in force has no row. So hits (forecast
+  and happened), false alarms (forecast, nothing) and misses (not forecast, happened) can be
+  counted, but a correctly quiet forecast cannot. A miss is scored only at leads for which a
+  statement exists, so a gap in the statement history is not counted against the forecast.
+- **What it is not.** It compares the forecast with the EA's alerts and warnings, which are
+  decisions, not with observed flooding. A warning can be issued without a forecast having
+  flagged the constituency, and the reverse.
+
+It runs daily as step 3 of `Master_daily`, after the warning episodes that step 10 of
+`Master_polling` keeps current. It prints a hit rate and precision by lead day at Medium or
+above; read that before trusting the table.
+
+```sql
+-- Medium or above against any alert or warning, by lead day.
+SELECT lead_day,
+       SUM(CASE WHEN forecast_rank >= 3 AND alerts + warnings > 0 THEN 1 ELSE 0 END)  AS hits,
+       SUM(CASE WHEN forecast_rank >= 3 AND alerts + warnings = 0 THEN 1 ELSE 0 END)  AS false_alarms,
+       SUM(CASE WHEN forecast_rank <  3 AND alerts + warnings > 0 THEN 1 ELSE 0 END)  AS misses
+FROM prd_dash_lab.flood_forecasting_unrestricted.fgs_forecast_verification
+GROUP BY lead_day ORDER BY lead_day;
+```
+
 ## Typical query: which MPs need to be alerted?
 
 ```sql
@@ -1110,6 +1149,7 @@ ones. See "History is an archive" above.
 │   ├── 23_ea_rt_live_readings         Live tail of EA real-time readings, every site
 │   ├── 24_backfill_mp_briefing_drafts Drafts for earlier statements, to review after the event (manual)
 │   ├── 25_warning_history_periods     Start, end and duration of every alert and warning, from the message history (manual)
+│   ├── 26_fgs_forecast_verification   Forecast risk against the alerts and warnings in force, by lead day
 │   ├── 12_ea_area_boundaries_download EA administrative boundaries (manual)
 │   ├── 15_rt_station_measure_register All EA stations and measures (manual)
 │   ├── 16_build_wiski_lookup          Measures x WISKI ids from an external CSV (manual)

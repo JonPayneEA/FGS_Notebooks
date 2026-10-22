@@ -298,3 +298,11 @@ resources:
             notebook_path: "../jobs/21_fgs_constituency_exposure.ipynb"
           existing_cluster_id: ${var.cluster_id}
           timeout_seconds: 1800
+
+        # Reads the warning episodes that the polling job keeps current.
+        - task_key: "fgs_verification"
+          description: "FGS forecast risk against the alerts and warnings in force, by constituency, date and lead day"
+          notebook_task:
+            notebook_path: "../jobs/26_fgs_forecast_verification.ipynb"
+          existing_cluster_id: ${var.cluster_id}
+          timeout_seconds: 3600
