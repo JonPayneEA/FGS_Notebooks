@@ -245,6 +245,84 @@ def stage_pairs(rows: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out, columns=cols).drop_duplicates("telemetry_id").reset_index(drop=True)
 
 
+# Elements of many Welsh place names. A HINT only: it is wrong for some sites (Aberdeen is in Scotland) and
+# misses others, and it is there to help someone decide, not to decide. Long elements match the start of a word
+# (llan matches Llanwrtyd); short ones must be a whole word (pen, ty).
+_WELSH_PREFIXES = ("aber", "afon", "bryn", "caer", "coed", "glan", "llan", "llyn", "maes", "nant", "pont", "porth", "rhyd",
+                   "rhos", "ystrad", "pwll", "cefn")
+_WELSH_WORDS = {"pen", "ty", "tre", "dol", "cwm", "bach", "fach", "mawr", "y", "yr"} - {"y", "yr"}
+
+
+def id_shape(value) -> str:
+    """The shape of an ID: digits as 9, letters as A, everything else kept ("067033_TG 148" is 999999_AA 999)."""
+    v = clean(value) or ""
+    return "".join("9" if ch.isdigit() else "A" if ch.isalpha() else ch for ch in v)
+
+
+def welsh_hint(name) -> bool:
+    toks = re.findall(r"[a-z]+", (clean(name) or "").lower())
+    return any(t in _WELSH_WORDS or any(t.startswith(p) for p in _WELSH_PREFIXES) for t in toks)
+
+
+def profile_unplaced(rows: pd.DataFrame) -> dict:
+    """
+    What the unplaced mapping rows (given as one line each) have in common, so a rule or a list can be
+    made for them: the shape of the TelemetryID, its first characters, what they measure, whether the
+    name has Welsh place-name elements (a hint), and how many carry a WISKI id.
+    Returns a dict of small DataFrames: shapes, prefixes, parameters, hints.
+    """
+    r = rows.drop_duplicates("id")
+    shapes = r["telemetry_id"].map(id_shape).value_counts().rename("rows").reset_index().rename(columns={"telemetry_id": "shape", "index": "shape"})
+    prefixes = r["telemetry_id"].map(lambda v: (clean(v) or "")[:2].upper()).value_counts().rename("rows").reset_index()
+    prefixes.columns = ["first_two_characters", "rows"]
+    params = r.groupby([r["parameter_id"].fillna("(none)"), r["telemetry_parameter"].fillna("(none)")]).size().rename("rows").reset_index()
+    params = params.sort_values("rows", ascending=False)
+    hint = r["fffs_location_name"].map(welsh_hint)
+    hints = pd.DataFrame({"measure": ["rows", "name has a Welsh place-name element (hint only)", "has a WISKI id"],
+                          "count": [len(r), int(hint.sum()), int(r["wiski_id"].notna().sum()) if "wiski_id" in r else 0]})
+    shapes.columns = ["shape", "rows"]
+    return {"shapes": shapes, "prefixes": prefixes, "parameters": params, "hints": hints}
+
+
+def candidate_measures(candidates: pd.DataFrame, register: pd.DataFrame) -> pd.DataFrame:
+    """
+    The measures behind each candidate station, so a name-based candidate can be judged: its
+    parameter, qualifier, value type (instantaneous, mean ...), period and unit, and whether it is a
+    tidal level. One line per candidate measure. A station reached by name often has several
+    measures that differ only in value type, which is what makes a name match ambiguous.
+    """
+    cols = ["id", "telemetry_id", "fffs_location_name", "how", "candidate_station_reference", "candidate_label", "measure_uri",
+            "parameter", "qualifier", "value_type", "period", "unit_name", "tidal"]
+    if candidates.empty:
+        return pd.DataFrame(columns=cols)
+    reg = register.copy()
+    for c in ("value_type", "unit_name", "qualifier", "parameter", "period"):
+        if c not in reg:
+            reg[c] = None
+    reg["_ref"] = reg["station_reference"].map(clean)
+    out = candidates.assign(_ref=candidates["candidate_station_reference"].map(clean)).merge(
+        reg[["_ref", "measure_uri", "parameter", "qualifier", "value_type", "period", "unit_name"]], on="_ref", how="left")
+    out["tidal"] = (out["qualifier"].fillna("").str.contains("tidal", case=False)
+                    | out["parameter"].fillna("").str.contains("tidal", case=False))
+    return out[cols]
+
+
+def tidal_summary(cand_measures: pd.DataFrame) -> pd.DataFrame:
+    """
+    For rows reached by a similar name: how many have candidate stations that are tidal, and how many
+    distinct stations each row reaches (the same place often has several: instantaneous, mean ...).
+    """
+    cm = cand_measures
+    if cm.empty:
+        return pd.DataFrame(columns=["id", "stations", "measures", "any_tidal", "value_types"])
+    g = cm.groupby("id")
+    return pd.DataFrame({
+        "stations": g["candidate_station_reference"].nunique(),
+        "measures": g["measure_uri"].nunique(),
+        "any_tidal": g["tidal"].any(),
+        "value_types": g["value_type"].agg(lambda s: " | ".join(sorted({str(v) for v in s.dropna()})))}).reset_index()
+
+
 def unmapped_measures(register: pd.DataFrame, rows: pd.DataFrame) -> pd.DataFrame:
     """
     Register measures that no matched mapping row points at, each with the family it is and why it is

@@ -8,7 +8,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.telemetry_mapping import (  # noqa: E402
-    clean, family_of_code, family_of_text, match_mapping, prepare_mapping, reconcile_family, settle_by_readings,
+    clean, family_of_code, family_of_text, flag_inactive, flag_out_of_scope, match_mapping, prepare_mapping, reconcile_family, settle_by_readings,
 )
 
 
@@ -186,3 +186,40 @@ def test_only_the_space_after_tg_becomes_an_underscore():
     by = rows.set_index("id")
     assert by.loc["c", "match_status"] == "matched" and by.loc["c", "match_note"] == ""
     assert by.loc["d", "match_status"] == "no_station"
+
+
+def test_inactive_sites_that_matched_nothing_are_set_aside_but_a_real_match_is_kept():
+    reg = register([("m/1", "S1", "level", "Stage", "900"), ("m/2", "S2", "level", "Stage", "900"), ("m/3", "S2", "level", "Stage", "900")])
+    rows, report = match_mapping(mapping([
+        ("a", "F1", "Pevensey INACTIVE", "H.obs", "NOPE", "Water Level", None, "1"),      # nothing matched: set aside
+        ("b", "F2", "Herne Bay inactive", "H.obs", "S1", "Water Level", None, "2"),       # matched a live measure: kept
+        ("c", "F3", "Twin INACTIVE", "H.obs", "S2", "Water Level", None, "3"),            # ambiguous (two candidates): set aside once
+        ("d", "F4", "Live Place", "H.obs", "NOPE", "Water Level", None, "4")]), reg)
+    by = rows.drop_duplicates("id").set_index("id")
+    assert by.loc["a", "match_status"] == "inactive" and by.loc["c", "match_status"] == "inactive"
+    assert by.loc["b", "match_status"] == "matched" and "INACTIVE" in by.loc["b", "match_note"]
+    assert by.loc["d", "match_status"] == "no_station"                                      # an ordinary miss is still a miss
+    assert (rows["id"] == "c").sum() == 1 and pd.isna(rows.loc[rows["id"] == "c", "measure_uri"].iloc[0])
+    assert report["statuses"]["inactive"] == 2
+    assert flag_inactive(rows.iloc[0:0]).empty
+
+
+def test_a_supplied_list_sets_unmatched_sites_aside_and_keeps_real_matches():
+    reg = register([("m/1", "S1", "level", "Stage", "900")])
+    rows, _ = match_mapping(mapping([("a", "W1", "Pont Rhyd", "H.obs", "NOPE", "Water Level", None, "1"),
+                                     ("b", "W2", "Matched anyway", "H.obs", "S1", "Water Level", None, "2"),
+                                     ("c", "E1", "English Place", "H.obs", "NOPE2", "Water Level", None, "3"),
+                                     ("d", "W3", "By telemetry id", "H.obs", "NOPE3", "Water Level", None, "4")]), reg)
+    scope = pd.DataFrame({"FFFS ID": ["W1", "W2", None], "Telemetry_ID": [None, None, "NOPE3"],
+                          "Reason": ["Wales (NRW)", "Wales (NRW)", "Wales (NRW)"]})
+    out = flag_out_of_scope(rows, scope).set_index("id")
+    assert out.loc["a", "match_status"] == "out_of_scope" and out.loc["a", "match_note"] == "Wales (NRW)"
+    assert out.loc["d", "match_status"] == "out_of_scope"                      # listed by telemetry id
+    assert out.loc["b", "match_status"] == "matched" and "listed as out of scope" in out.loc["b", "match_note"]
+    assert out.loc["c", "match_status"] == "no_station"                         # not listed: still a miss
+    assert flag_out_of_scope(rows, pd.DataFrame()).equals(rows)
+    try:
+        flag_out_of_scope(rows, pd.DataFrame({"Name": ["x"]}))
+        assert False
+    except ValueError as e:
+        assert "FFFS_ID or TelemetryID" in str(e)
