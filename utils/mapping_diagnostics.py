@@ -73,7 +73,7 @@ def _index(stations: pd.DataFrame, column: str, tidy: bool = False) -> dict:
     return out
 
 
-def station_candidates(rows: pd.DataFrame, stations: pd.DataFrame, max_per_row: int = 3) -> pd.DataFrame:
+def station_candidates(rows: pd.DataFrame, stations: pd.DataFrame, max_per_row: int = 3, register_refs=None) -> pd.DataFrame:
     """
     Candidate stations for mapping rows that matched no station.
 
@@ -81,10 +81,13 @@ def station_candidates(rows: pd.DataFrame, stations: pd.DataFrame, max_per_row: 
         rows:      one line per mapping row, with id, telemetry_id, wiski_id, fffs_location_name.
         stations:  ea_rt_stations: stationReference, notation, label, RLOIid, wiskiID.
         max_per_row: the best candidates kept per row.
+        register_refs: the station references in ea_rt_measure_register. A candidate that is NOT in it is
+                   listed by the stations API but has no readings in the feed (Welsh sites, for one), so
+                   a new rule could not reach it: candidate_in_register says which is which.
 
     Returns:
-        id, telemetry_id, fffs_location_name, how, candidate_station_reference, candidate_label, score.
-        A row with no candidate by any route is absent; count it as the difference.
+        id, telemetry_id, fffs_location_name, how, candidate_station_reference, candidate_label, score,
+        candidate_in_register. A row with no candidate by any route is absent; count it as the difference.
     """
     s = stations.reset_index(drop=True)
     by_rloi, by_notation, by_wiski = _index(s, "RLOIid"), _index(s, "notation"), _index(s, "wiskiID")
@@ -96,6 +99,7 @@ def station_candidates(rows: pd.DataFrame, stations: pd.DataFrame, max_per_row: 
         for t in name_tokens(label):
             words.setdefault(t, []).append(pos)
 
+    refs = None if register_refs is None else {clean(x) for x in register_refs if clean(x)}
     found = []
     for r in rows.drop_duplicates("id").to_dict("records"):
         tid, wid, name = clean(r.get("telemetry_id")), clean(r.get("wiski_id")), r.get("fffs_location_name")
@@ -129,24 +133,42 @@ def station_candidates(rows: pd.DataFrame, stations: pd.DataFrame, max_per_row: 
             if len(kept) >= max_per_row:
                 break
         for route, pos, score in kept:
+            ref = s.loc[pos, "stationReference"] if "stationReference" in s else None
             found.append({"id": r["id"], "telemetry_id": tid, "fffs_location_name": name, "how": route,
-                          "candidate_station_reference": s.loc[pos, "stationReference"] if "stationReference" in s else None,
-                          "candidate_label": s.loc[pos, "label"] if "label" in s else None, "score": score})
-    cols = ["id", "telemetry_id", "fffs_location_name", "how", "candidate_station_reference", "candidate_label", "score"]
+                          "candidate_station_reference": ref,
+                          "candidate_label": s.loc[pos, "label"] if "label" in s else None, "score": score,
+                          "candidate_in_register": None if refs is None else (clean(ref) in refs)})
+    cols = ["id", "telemetry_id", "fffs_location_name", "how", "candidate_station_reference", "candidate_label", "score",
+            "candidate_in_register"]
     return pd.DataFrame(found, columns=cols)
 
 
 def candidate_summary(rows: pd.DataFrame, candidates: pd.DataFrame) -> pd.DataFrame:
-    """How many mapping rows each route would have found, counting each row once at its best route."""
+    """
+    How many mapping rows each route would have found, counting each row once at its best route.
+    Where the candidates say whether the station is in the register, a route is split into
+    "reachable" (the station has readings, so a rule using this route would gain a match) and
+    "listed, no readings in the feed" (found, but there is nothing to link: Welsh sites, say).
+    """
     total = rows["id"].nunique()
     if candidates.empty:
-        return pd.DataFrame({"how": ["no candidate"], "rows": [total]})
-    best = candidates.assign(rank=candidates["how"].map(ROUTES.index)).sort_values(["id", "rank"]).drop_duplicates("id")
-    counts = best["how"].value_counts().reindex(ROUTES).dropna().astype(int)
-    out = pd.DataFrame({"how": counts.index, "rows": counts.values})
+        return pd.DataFrame({"how": ["no candidate"], "reachable": [None], "rows": [total]})
+    c = candidates.assign(rank=candidates["how"].map(ROUTES.index))
+    known = c["candidate_in_register"].notna().any()
+    # A row's best candidate is the best-ranked one that IS in the register, if any, else the best of all.
+    if known:
+        c["reg_rank"] = (~c["candidate_in_register"].fillna(False).astype(bool)).astype(int)
+        best = c.sort_values(["id", "reg_rank", "rank"]).drop_duplicates("id")
+    else:
+        best = c.sort_values(["id", "rank"]).drop_duplicates("id")
+    best = best.assign(reachable=best["candidate_in_register"].map({True: "reachable", False: "listed, no readings in the feed"})
+                       if known else None)
+    out = best.groupby(["how", "reachable"], dropna=False).size().rename("rows").reset_index()
+    out["order"] = out["how"].map(ROUTES.index)
+    out = out.sort_values(["order", "reachable"]).drop(columns="order").reset_index(drop=True)
     missing = total - int(out["rows"].sum())
     if missing > 0:
-        out = pd.concat([out, pd.DataFrame({"how": ["no candidate"], "rows": [missing]})], ignore_index=True)
+        out = pd.concat([out, pd.DataFrame({"how": ["no candidate"], "reachable": [None], "rows": [missing]})], ignore_index=True)
     return out
 
 
