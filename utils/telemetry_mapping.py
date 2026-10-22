@@ -92,27 +92,37 @@ def family_of_code(code):
 def prepare_mapping(raw: pd.DataFrame):
     """
     The mapping file with clean columns (OUTPUT_FIELDS), the two families and a note on what
-    the file got wrong. Returns (mapping, report); report counts rows, rows with no TelemetryID
-    and WISKI ids Excel turned into scientific notation, which have lost digits and are blanked.
+    the file got wrong. EVERY other column in the file is kept too, as text, named src_ plus its
+    own name (a station name column, say), so nothing in the file is lost on the way in; the
+    WISKI id exactly as the file holds it is kept as wiski_id_in_file. Returns (mapping, report);
+    report counts rows, rows with no TelemetryID and WISKI ids Excel turned into scientific
+    notation, which have lost digits and are blanked, and lists the extra columns kept.
     """
-    cols = {}
+    cols, extras, taken = {}, {}, set()
     for c in raw.columns:
         key = re.sub(r"[^a-z0-9_]", "", str(c).lower())
         if key in FILE_COLUMNS and FILE_COLUMNS[key] not in cols.values():
             cols[c] = FILE_COLUMNS[key]
-    m = raw.rename(columns=cols)[[c for c in cols.values()]].copy()
+        else:
+            name = "src_" + (re.sub(r"[^a-z0-9]+", "_", str(c).lower()).strip("_") or "column")
+            while name in taken:
+                name += "_"
+            taken.add(name)
+            extras[c] = name
+    m = raw.rename(columns={**cols, **extras})[[*cols.values(), *extras.values()]].copy()
     for field in OUTPUT_FIELDS:
         if field not in m:
             m[field] = None
-    m = m[OUTPUT_FIELDS].copy()
-    for field in OUTPUT_FIELDS:
+    m = m[OUTPUT_FIELDS + list(extras.values())].copy()
+    for field in m.columns:
         m[field] = m[field].map(clean)
+    m["wiski_id_in_file"] = m["wiski_id"]
     scientific = m["wiski_id"].map(lambda v: bool(v) and bool(_SCIENTIFIC.match(v)))
     m.loc[scientific, "wiski_id"] = None
     m["telemetry_family"] = m["telemetry_parameter"].map(family_of_text)
     m["code_family"] = m["parameter_id"].map(family_of_code)
     report = {"rows": int(len(m)), "no_telemetry_id": int(m["telemetry_id"].isna().sum()),
-              "wiski_id_in_scientific_notation": int(scientific.sum())}
+              "wiski_id_in_scientific_notation": int(scientific.sum()), "extra_columns": list(extras.values())}
     return m, report
 
 

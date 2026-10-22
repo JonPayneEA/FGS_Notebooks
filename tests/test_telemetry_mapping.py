@@ -97,4 +97,18 @@ def test_cleaning_the_file():
     m, report = prepare_mapping(pd.DataFrame({"TelemetryID": [4687.0, "E1"], "WISKI_ID": ["4.53E+08", "713207"],
                                               "FFFS_ID": ["a", "b"], "Extra": [1, 2]}))
     assert list(m["telemetry_id"]) == ["4687", "E1"] and pd.isna(m["wiski_id"].iloc[0]) and m["wiski_id"].iloc[1] == "713207"
-    assert report["wiski_id_in_scientific_notation"] == 1 and "Extra" not in m
+    assert report["wiski_id_in_scientific_notation"] == 1
+    # Nothing in the file is lost: an unrecognised column is kept, as text, and the WISKI id as the file held it.
+    assert report["extra_columns"] == ["src_extra"] and list(m["src_extra"]) == ["1", "2"]
+    assert list(m["wiski_id_in_file"]) == ["4.53E+08", "713207"]
+
+
+def test_extra_columns_survive_the_match():
+    raw = pd.DataFrame({"ID": ["a"], "FFFS_ID": ["F1"], "FFFSLocName": ["Cwm Rheidol RG"], "ParameterID": ["P.obs"],
+                        "TelemetryID": ["520455"], "TelemetryParameter": ["Rainfall"], "Station Name": ["Cwm Rheidol"],
+                        "Notes (free text)": ["check datum"]})
+    m, report = prepare_mapping(raw)
+    assert report["extra_columns"] == ["src_station_name", "src_notes_free_text"]
+    rows, _ = match_mapping(m, REG)
+    assert rows.loc[0, "src_station_name"] == "Cwm Rheidol" and rows.loc[0, "src_notes_free_text"] == "check datum"
+    assert rows.loc[0, "match_status"] == "matched"
