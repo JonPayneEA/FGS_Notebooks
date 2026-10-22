@@ -14,7 +14,9 @@
 #   ParameterID          a code whose prefix names the family: H.obs, Q.obs, P.obs, GW.obs ...
 # Each is reduced to a family (level, flow, rainfall, groundwater, wave, shingle). If both are
 # known and differ, the row is written as a conflict and NOT matched: it is for a person to
-# settle, not for this code to guess. The register's parameter and qualifier are reduced to the
+# settle, not for this code to guess. ONE difference is not a conflict: a groundwater level gauge
+# is called "Water Level" in TelemetryParameter and GW.obs in ParameterID. The code is the more
+# specific, so a "level" text with a groundwater code is a groundwater measure. The register's parameter and qualifier are reduced to the
 # same families. A station with one measure is not matched on the station alone, because that
 # is the mistake this replaces.
 #
@@ -87,6 +89,20 @@ def family_of_code(code):
     if not c:
         return None
     return _CODE_FAMILIES.get(c.split(".")[0])
+
+
+def reconcile_family(text_family, code_family):
+    """
+    The family a mapping row is for, from the two columns, and whether they conflict.
+    Returns (family, conflict). Either alone is used. Equal is that. A level text with a
+    groundwater code is groundwater (the code is the more specific). Anything else that
+    differs is a conflict and has no family.
+    """
+    if text_family and code_family and text_family != code_family:
+        if text_family == "level" and code_family == "groundwater":
+            return "groundwater", False
+        return None, True
+    return (text_family or code_family), False
 
 
 def prepare_mapping(raw: pd.DataFrame):
@@ -171,10 +187,10 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
         if not tid:
             add(row, "no_telemetry_id", "the row has no TelemetryID")
             continue
-        if tf and cf and tf != cf:
+        family, conflict = reconcile_family(tf, cf)
+        if conflict:
             add(row, "conflict", f"TelemetryParameter says {tf} but ParameterID says {cf}")
             continue
-        family = tf or cf
         if family is None:
             add(row, "unknown_parameter", "neither TelemetryParameter nor ParameterID names a known parameter")
             continue

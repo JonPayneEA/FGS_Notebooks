@@ -8,7 +8,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.telemetry_mapping import (  # noqa: E402
-    clean, family_of_code, family_of_text, match_mapping, prepare_mapping,
+    clean, family_of_code, family_of_text, match_mapping, prepare_mapping, reconcile_family,
 )
 
 
@@ -60,12 +60,23 @@ def test_either_column_alone_can_name_the_family():
     assert set(rows["match_status"]) == {"matched"} and set(rows["measure_uri"]) == {"m/rg-1"}
 
 
-def test_groundwater_is_not_confused_with_level():
+def test_a_groundwater_gauge_called_water_level_is_groundwater_not_a_conflict():
+    # TelemetryParameter says Water Level, ParameterID says GW.obs: the code is the more specific.
     rows, _ = run([("a", "X", "Gauge", "GW.obs", "SU74_73", "Water Level", "Groundwater", "9")])
-    # TelemetryParameter says level, ParameterID says groundwater: a conflict, written as such.
-    assert rows.loc[0, "match_status"] == "conflict"
+    assert rows.loc[0, "match_status"] == "matched" and rows.loc[0, "measure_uri"] == "m/gw-1"
     rows, _ = run([("a", "X", "Gauge", "GW.obs", "SU74_73", "Groundwater", "Groundwater", "9")])
     assert rows.loc[0, "match_status"] == "matched" and rows.loc[0, "measure_uri"] == "m/gw-1"
+    # It must not match the station's ordinary level measure.
+    reg = register([("m/lvl", "S5", "level", "Stage", "900"), ("m/gw", "S5", "level", "Groundwater", "900")])
+    rows, _ = match_mapping(mapping([("a", "X", "G", "GW.obs", "S5", "Water Level", None, "1")]), reg)
+    assert list(rows["measure_uri"]) == ["m/gw"]
+
+
+def test_other_disagreements_are_still_conflicts():
+    assert reconcile_family("level", "groundwater") == ("groundwater", False)
+    assert reconcile_family("groundwater", "level") == (None, True)           # the other way round is not the same thing
+    assert reconcile_family("flow", "level") == (None, True)
+    assert reconcile_family("level", None) == ("level", False) and reconcile_family(None, "flow") == ("flow", False)
 
 
 def test_several_fitting_measures_are_ambiguous_unless_the_qualifier_settles_it():
