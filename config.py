@@ -157,7 +157,7 @@ TBL_FGS_CHANGES_LOG     = f"{CATALOG}.{SCHEMA}.fgs_changes_log"
 TBL_CONST_SITUATION     = f"{CATALOG}.{SCHEMA}.constituency_flood_situation"
 TBL_MP_BRIEFING_DRAFTS  = f"{CATALOG}.{SCHEMA}.mp_briefing_drafts"
 TBL_FGS_EXPOSURE        = f"{CATALOG}.{SCHEMA}.fgs_constituency_exposure"
-TBL_FGS_VERIFICATION    = f"{CATALOG}.{SCHEMA}.fgs_forecast_verification"   # job 26: forecast risk against alerts and warnings in force
+TBL_WARNING_FGS_COVERAGE = f"{CATALOG}.{SCHEMA}.ea_warning_fgs_coverage"   # job 26: each warning, and whether and when an FGS polygon covered it
 TBL_PIPELINE_HEALTH     = f"{CATALOG}.{SCHEMA}.pipeline_health"
 TBL_EA_THRESHOLDS       = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_thresholds_all"
 
