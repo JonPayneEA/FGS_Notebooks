@@ -117,3 +117,19 @@ def test_other_ambiguities_are_not_stage_pairs():
                           "telemetry_parameter": "x", "parameter_qualifier": None, "register_qualifier": q, "period": "900",
                           "wiski_id": "W", "fffs_id": "F"} for q in ("Stage", "Tidal Level")])
     assert stage_pairs(amb2).empty
+
+
+def test_a_route_that_finds_only_stations_without_readings_is_separated_from_one_that_can_gain_matches():
+    # S100 and S200 are in the register (they have readings); 0412 is listed by the stations API but is not (a Welsh site).
+    r = rows([("a", "7001", None, "x"), ("b", "7002", None, "x"), ("c", "N-200", None, "x")])
+    c = station_candidates(r, STATIONS, register_refs=["S100", "S200"])
+    assert dict(zip(c["id"], c["candidate_in_register"])) == {"a": True, "b": True, "c": True}
+    stations = STATIONS.copy()
+    stations.loc[stations["stationReference"] == "S200", "RLOIid"] = "7009"
+    c = station_candidates(rows([("a", "7001", None, "x"), ("w", "7009", None, "x")]), stations, register_refs=["S100"])
+    s = candidate_summary(rows([("a", "7001", None, "x"), ("w", "7009", None, "x")]), c)
+    got = {(h, rch): n for h, rch, n in zip(s["how"], s["reachable"], s["rows"])}
+    assert got == {("RLOIid", "reachable"): 1, ("RLOIid", "listed, no readings in the feed"): 1}
+    # Without the register the split is simply unknown, not wrong.
+    c = station_candidates(rows([("a", "7001", None, "x")]), STATIONS)
+    assert c["candidate_in_register"].isna().all()
