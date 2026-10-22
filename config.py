@@ -140,7 +140,9 @@ TBL_FGS_CONTACTS        = f"{CATALOG}.{SCHEMA}.fgs_constituency_mp_contacts"
 TBL_EA_ADMIN_AREAS      = f"{CATALOG}.{SCHEMA}.ea_administrative_areas"
 TBL_EA_RT_STATIONS      = f"{CATALOG}.{SCHEMA}.ea_rt_stations"
 TBL_EA_RT_STATION_MEASURES = f"{CATALOG}.{SCHEMA}.ea_rt_station_measures"
-TBL_WISKI_LOOKUP        = f"{CATALOG}.{SCHEMA}.ea_rt_wiski_lookup"
+TBL_WISKI_LOOKUP        = f"{CATALOG}.{SCHEMA}.ea_rt_wiski_lookup"          # job 16: now a VIEW over the telemetry mapping (matched rows with a WISKI id)
+TBL_TELEMETRY_MAPPING   = f"{CATALOG}.{SCHEMA}.ea_rt_telemetry_mapping"     # job 16: the mapping file, each row matched to a measure
+TBL_MEASURES_MAPPED     = f"{CATALOG}.{SCHEMA}.ea_rt_measures_mapped"       # job 16: the register with each measure's gauge name, FFFS id and WISKI id
 
 # Live readings (job 23). The daily archive (job 10) lands each day's readings about
 # one to two days late, so this table holds the last few days polled from the EA API
@@ -163,7 +165,8 @@ TBL_EA_THRESHOLDS       = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_thresholds_all"
 
 # Externally supplied CSVs, read from Unity Catalog volumes by notebooks 16 and 17.
 EXTERNAL_VOLUME  = "shared_external_volume"
-WISKI_LOOKUP_CSV = f"/Volumes/{CATALOG}/{SCHEMA}/{EXTERNAL_VOLUME}/realTime_WISKI_lookup.csv"
+WISKI_LOOKUP_CSV = f"/Volumes/{CATALOG}/{SCHEMA}/{EXTERNAL_VOLUME}/realTime_WISKI_lookup.csv"   # retired: 16 no longer reads it
+WISKI_MAPPING_CSV = f"/Volumes/{CATALOG}/{SCHEMA}/{EXTERNAL_VOLUME}/WISKI_Mapping.csv"          # TelemetryID, FFFS_ID, WISKI_ID and the parameter each row is for
 THRESHOLDS_CSV   = f"/Volumes/{CATALOG}/{RESTRICTED_SCHEMA}/{EXTERNAL_VOLUME}/thresholds_Feb.csv"
 
 # -----------------------------------------------------------------------------
