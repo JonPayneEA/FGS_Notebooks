@@ -1221,7 +1221,10 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     parameter and qualifier are reduced to the same families. If the two columns disagree the
     row is a conflict and is not matched. A station with one measure is not matched on the
     station alone. The rules are in `utils/telemetry_mapping.py`.
-  - **`ea_rt_telemetry_mapping`** holds every row of the file with its `match_status`
+  - **`ea_rt_telemetry_mapping`** holds every row and every column of the file. The columns it
+    uses by name keep clean names; any other column (a station name, say) is kept as text as
+    `src_<column>`, and `wiski_id_in_file` is the WISKI id exactly as the file holds it (the clean
+    `wiski_id` blanks one Excel has turned into scientific notation). Each row has its `match_status`
     (`matched`, `ambiguous` with one line per candidate, `conflict`, `unknown_parameter`,
     `no_station`, `no_parameter`, `no_telemetry_id`), a note saying why, and the measure it
     matched. Use only `matched` rows as the link. `fffs_id` is the key to the thresholds.
