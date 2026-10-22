@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.mapping_diagnostics import (  # noqa: E402
     candidate_measures, candidate_summary, classify_ambiguity, matched_name_check, name_similarity, stage_pairs,
-    station_candidates, tidal_summary, tidy_id, unmapped_measures,
+    id_shape, profile_unplaced, station_candidates, tidal_summary, tidy_id, unmapped_measures, welsh_hint,
 )
 
 STATIONS = pd.DataFrame({
@@ -149,3 +149,17 @@ def test_a_name_match_reaches_stations_whose_measures_differ_only_in_value_type(
     assert len(cm) == 4 and cm["tidal"].tolist().count(True) == 3
     ts = tidal_summary(cm).iloc[0]
     assert ts["stations"] == 3 and ts["measures"] == 4 and bool(ts["any_tidal"]) and ts["value_types"] == "instantaneous | mean"
+
+
+def test_the_profile_of_unplaced_rows_shows_what_they_share():
+    r = pd.DataFrame({"id": list("abcd"), "telemetry_id": ["067033_TG 148", "067624_TG 126", "5338N011W", None],
+                      "parameter_id": ["P.obs", "P.obs", "H.obs", None], "telemetry_parameter": ["Rainfall", "Rainfall", "Water Level", None],
+                      "fffs_location_name": ["Pont y Rhyd", "Aberdeen Road", "Leith", "Llanwrtyd"], "wiski_id": ["1", None, "3", None]})
+    assert id_shape("067033_TG 148") == "999999_AA 999" and id_shape("5338N011W") == "9999A999A"
+    p = profile_unplaced(r)
+    assert p["shapes"].set_index("shape")["rows"].to_dict()["999999_AA 999"] == 2
+    assert p["prefixes"].set_index("first_two_characters")["rows"]["06"] == 2
+    h = p["hints"].set_index("measure")["count"]
+    # Pont y Rhyd, Aberdeen Road and Llanwrtyd: Aberdeen is a false hint, which is why it is only a hint.
+    assert h["rows"] == 4 and h["has a WISKI id"] == 2 and h["name has a Welsh place-name element (hint only)"] == 3
+    assert welsh_hint("Pont y Rhyd") and welsh_hint("Llanwrtyd") and welsh_hint("Ty Mawr") and not welsh_hint("Leith") and not welsh_hint("")

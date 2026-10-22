@@ -1231,7 +1231,7 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     `src_<column>`, and `wiski_id_in_file` is the WISKI id exactly as the file holds it (the clean
     `wiski_id` blanks one Excel has turned into scientific notation). Each row has its `match_status`
     (`matched`, `ambiguous` with one line per candidate, `conflict`, `unknown_parameter`,
-    `no_station`, `no_parameter`, `no_telemetry_id`, `inactive`), a note saying why, and the measure it
+    `no_station`, `no_parameter`, `no_telemetry_id`, `inactive`, `out_of_scope`), a note saying why, and the measure it
     matched. A row whose location name says INACTIVE and that matched nothing is set aside as
     `inactive`; one that matched a live measure stays matched, with a note. Use only `matched` rows as the link. `fffs_id` is the key to the thresholds.
   - **Settling by readings.** A station can list two measures of the same kind where only one ever
@@ -1259,6 +1259,12 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     re-save the column as text. Read the printed counts and every conflict, ambiguity and
     unmatched row before trusting the table.
 
+  - **Setting aside sites outside the feed.** Welsh sites, among others, are not in the real-time
+    feed and can never match, which swamps the counts of what is missing. The `out_of_scope_csv`
+    widget takes a CSV with an `FFFS_ID` and/or `TelemetryID` column and an optional `Reason`
+    column. Rows on it that matched nothing get the status `out_of_scope` with the reason as their
+    note; a listed row that did match stays matched, with a note. A list can come from filtering the
+    Incident Management Reference Database export to Wales.
   - **Finding out why rows did not match.** `explore/Explore_telemetry_mapping` is a read-only
     notebook. Run it after 16. It shows the rows by status, the matches whose gauge name and
     station name disagree (a wrong match shows up there first), and for each unmatched status the

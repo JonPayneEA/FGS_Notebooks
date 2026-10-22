@@ -47,6 +47,8 @@
 #   no_parameter     the station is there but has no measure of that family
 #   no_telemetry_id  the row has no TelemetryID
 #   inactive         the location name says INACTIVE and the row matched nothing
+#   out_of_scope     the row is on a list of sites known to be outside the real-time feed (see
+#                    flag_out_of_scope) and matched nothing
 # =============================================================================
 
 import re
@@ -173,6 +175,31 @@ def prepare_register(register: pd.DataFrame) -> pd.DataFrame:
     return r
 
 
+_MEASURE_COLUMNS = ("measure_uri", "station_reference", "station_label", "register_parameter", "register_qualifier", "period", "unit_name")
+
+
+def _set_aside(rows: pd.DataFrame, mask: pd.Series, status: str, note, keep_note_for_matched: str):
+    """
+    Give every UNMATCHED mapping row selected by `mask` the status `status`, collapsed to one line with no
+    measure. A selected row that matched a measure is left matched and gets keep_note_for_matched on its
+    note. `note` is a string, or a function of the row's FFFS id and TelemetryID giving its own note.
+    """
+    r = rows.copy()
+    matched_ids = set(r.loc[mask & (r["match_status"] == "matched"), "id"])
+    kept = mask & r["id"].isin(matched_ids)
+    r.loc[kept, "match_note"] = r.loc[kept, "match_note"].fillna("").map(
+        lambda n: (n + "; " if n else "") + keep_note_for_matched)
+    aside = mask & ~r["id"].isin(matched_ids)
+    first = aside & ~r.duplicated("id")                              # one line per mapping row
+    for col in _MEASURE_COLUMNS:
+        if col in r:
+            r.loc[first, col] = None
+    r.loc[first, "match_status"] = status
+    r.loc[first, "match_note"] = [note(f, t) if callable(note) else note
+                                  for f, t in zip(r.loc[first, "fffs_id"], r.loc[first, "telemetry_id"])]
+    return r[~(aside & ~first)].reset_index(drop=True)
+
+
 def flag_inactive(rows: pd.DataFrame) -> pd.DataFrame:
     """
     Set aside mapping rows whose FFFS location name says INACTIVE and that matched nothing: one line
@@ -184,19 +211,39 @@ def flag_inactive(rows: pd.DataFrame) -> pd.DataFrame:
     inactive = rows["fffs_location_name"].fillna("").str.contains("inactive", case=False)
     if not inactive.any():
         return rows
-    r = rows.copy()
-    matched_ids = set(r.loc[inactive & (r["match_status"] == "matched"), "id"])
-    keep_matched = inactive & r["id"].isin(matched_ids)
-    r.loc[keep_matched, "match_note"] = r.loc[keep_matched, "match_note"].fillna("").map(
-        lambda n: (n + "; " if n else "") + "the location name says INACTIVE")
-    setting_aside = inactive & ~r["id"].isin(matched_ids)
-    first = setting_aside & ~r.duplicated("id")                       # one line per mapping row
-    for col in ("measure_uri", "station_reference", "station_label", "register_parameter", "register_qualifier", "period", "unit_name"):
-        if col in r:
-            r.loc[first, col] = None
-    r.loc[first, "match_status"] = "inactive"
-    r.loc[first, "match_note"] = "the location name says INACTIVE and nothing matched"
-    return r[~(setting_aside & ~first)].reset_index(drop=True)
+    return _set_aside(rows, inactive, "inactive", "the location name says INACTIVE and nothing matched",
+                      "the location name says INACTIVE")
+
+
+def flag_out_of_scope(rows: pd.DataFrame, scope: pd.DataFrame) -> pd.DataFrame:
+    """
+    Set aside mapping rows that are known to be outside what the real-time feed covers (Welsh sites, for one),
+    from a list the user supplies. `scope` has an fffs_id and/or telemetry_id column and an optional reason.
+    A listed row that matched nothing gets the status out_of_scope with the reason as its note; one that
+    matched a measure stays matched, with a note. Columns are matched without regard to case, spaces or
+    underscores (FFFS_ID, FFFS ID and fffs_id are the same).
+    """
+    if rows.empty or scope is None or scope.empty:
+        return rows
+    norm = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in scope.columns}
+    fcol, tcol, rcol = norm.get("fffsid"), norm.get("telemetryid"), norm.get("reason")
+    if not fcol and not tcol:
+        raise ValueError(f"The out-of-scope list needs an FFFS_ID or TelemetryID column. Columns present: {list(scope.columns)}")
+    fff = {clean(v) for v in scope[fcol]} - {None} if fcol else set()
+    tel = {clean(v) for v in scope[tcol]} - {None} if tcol else set()
+    reasons = {}
+    for col, key in ((fcol, "fffs_id"), (tcol, "telemetry_id")):
+        if col:
+            for k, why in zip(scope[col], scope[rcol] if rcol else [None] * len(scope)):
+                if clean(k):
+                    reasons[(key, clean(k))] = clean(why) or "listed as out of scope"
+    listed = rows["fffs_id"].map(clean).isin(fff) | rows["telemetry_id"].map(clean).isin(tel)
+    if not listed.any():
+        return rows
+
+    def note(f, t):
+        return reasons.get(("fffs_id", clean(f))) or reasons.get(("telemetry_id", clean(t))) or "listed as out of scope"
+    return _set_aside(rows, listed, "out_of_scope", note, "listed as out of scope, but matched a measure")
 
 
 def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
