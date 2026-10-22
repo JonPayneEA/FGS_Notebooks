@@ -20,6 +20,12 @@
 # same families. A station with one measure is not matched on the station alone, because that
 # is the mistake this replaces.
 #
+# SETTLING BY READINGS. A station can list two measures of the same kind of which only one ever
+# delivers data (a retired or duplicate entry). settle_by_readings() takes the readings each candidate
+# has: if exactly one candidate has any readings it is chosen, and if several have but exactly one has
+# a reading in the last `recent_days`, that one is. Anything else stays ambiguous. This is the one place
+# the match looks beyond the file and the register, and the note on the row says so.
+#
 # STATUS of each mapping row:
 #   matched          exactly one measure at that station has the family (after the qualifier
 #                    narrowed several, where it could)
@@ -222,3 +228,47 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
               "measures_matched_by_several_rows": int((shared > 1).sum()),
               "examples": examples}
     return rows, report
+
+
+def settle_by_readings(rows: pd.DataFrame, activity: pd.DataFrame, now, recent_days: int = 30):
+    """
+    Settle ambiguous rows using which candidate measures actually have readings, and add n_readings,
+    first_reading and last_reading to every row that has a measure.
+
+    Args:
+        rows:      match_mapping() output.
+        activity:  measure_uri, n_readings, first_reading, last_reading, for measures that have any
+                   readings (a measure absent from it has none).
+        now:       the time recent_days is counted back from.
+        recent_days: how recent a reading must be to separate two measures that both have data.
+
+    Returns:
+        (rows, settled). The ambiguous lines of a settled row collapse to its chosen measure, which
+        becomes matched with a note; settled is the number of mapping rows settled this way.
+    """
+    r = rows.copy().reset_index(drop=True)
+    act = activity.drop_duplicates("measure_uri").set_index("measure_uri") if len(activity) else None
+    has_uri = r["measure_uri"].notna()
+    for col in ("n_readings", "first_reading", "last_reading"):
+        r[col] = None
+        if act is not None and col in act:
+            r.loc[has_uri, col] = r.loc[has_uri, "measure_uri"].map(act[col])
+    r["n_readings"] = pd.to_numeric(r["n_readings"], errors="coerce").where(has_uri).fillna(0).where(has_uri)
+    last = pd.to_datetime(r["last_reading"], errors="coerce", utc=True).dt.tz_localize(None)
+    cutoff = pd.Timestamp(now).tz_localize(None) - pd.Timedelta(days=recent_days) if pd.Timestamp(now).tzinfo else pd.Timestamp(now) - pd.Timedelta(days=recent_days)
+    drop, settled = [], 0
+    for rid, g in r[r["match_status"] == "ambiguous"].groupby("id"):
+        with_data = g[g["n_readings"] > 0]
+        chosen, why = None, None
+        if len(with_data) == 1:
+            chosen, why = with_data.index[0], "settled by readings: the other candidate(s) have none"
+        elif len(with_data) > 1:
+            recent = with_data[last.loc[with_data.index] >= cutoff]
+            if len(recent) == 1:
+                chosen, why = recent.index[0], f"settled by readings: the other candidate(s) have none in the last {recent_days} days"
+        if chosen is None:
+            continue
+        r.loc[chosen, "match_status"], r.loc[chosen, "match_note"] = "matched", why
+        drop.extend(i for i in g.index if i != chosen)
+        settled += 1
+    return r.drop(index=drop).reset_index(drop=True), settled

@@ -1230,6 +1230,14 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     (`matched`, `ambiguous` with one line per candidate, `conflict`, `unknown_parameter`,
     `no_station`, `no_parameter`, `no_telemetry_id`), a note saying why, and the measure it
     matched. Use only `matched` rows as the link. `fffs_id` is the key to the thresholds.
+  - **Settling by readings.** A station can list two measures of the same kind where only one ever
+    delivers data (a retired or duplicate entry). The notebook counts each ambiguous candidate's
+    readings in `ea_rt_readings_all` (one scan, for the measures the mapping points at): if exactly
+    one has any it is chosen, and if several do but exactly one has a reading in the last 30 days,
+    that one is. The row's note says "settled by readings". Every matched measure also gets
+    `n_readings`, `first_reading` and `last_reading`, so a mapped gauge that delivers nothing is
+    visible. The `settle_by_readings` widget switches it off. Two candidates that both deliver stay
+    ambiguous: they are not guessed.
   - **`ea_rt_measures_mapped`** (a view) is the register with `gauge_name` (the file's
     `FFFSLocName`), `fffs_id`, `n_fffs_ids`, `wiski_id`, `wiski_parameter` and every other column
     of the file (`parameter_id`, `wiski_xml_*`, `src_<column>`) where a measure matched. A measure
@@ -1246,6 +1254,15 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     scientific notation (`4.53E+08`) has lost digits and is blanked, with a count printed:
     re-save the column as text. Read the printed counts and every conflict, ambiguity and
     unmatched row before trusting the table.
+
+  - **Finding out why rows did not match.** `explore/Explore_telemetry_mapping` is a read-only
+    notebook. Run it after 16. It shows the rows by status, the matches whose gauge name and
+    station name disagree (a wrong match shows up there first), and for each unmatched status the
+    reason. For `no_station` it looks every row up in `ea_rt_stations` by `RLOIid`, `notation`,
+    `wiskiID` (the file's `WISKI_ID` too), the ID tidied up (case, dashes, leading zeros) and a
+    similar name, and counts what each route would have found, so a matching rule can be chosen on
+    evidence. For `ambiguous` it says whether picking the shortest period would settle it. It also
+    lists the register measures nothing points at. The logic is in `utils/mapping_diagnostics.py`.
 
   ```sql
   -- How the mapping rows matched.
