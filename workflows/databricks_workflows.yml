@@ -301,7 +301,7 @@ resources:
 
         # Reads the warning episodes that the polling job keeps current.
         - task_key: "warning_fgs_coverage"
-          description: "Whether each alert and warning was under an FGS polygon, and whether it was issued before, on the day or after"
+          description: "Whether each alert and warning was under an FGS polygon when it was issued, and whether the forecast was made before the day, on it, or only later"
           notebook_task:
             notebook_path: "../jobs/26_warning_fgs_coverage.ipynb"
           existing_cluster_id: ${var.cluster_id}

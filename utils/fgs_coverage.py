@@ -6,29 +6,31 @@
 #
 # THE QUESTION. A warning (an episode from job 25) is for one EA area and runs from the
 # day it was issued to the day it ended. The FGS marks areas it expects to be at risk,
-# on a forecast date, in a statement issued on some day. The area counts as COVERED if a
-# risk polygon was linked to it (job 07: it overlapped the area, or for a coastal
-# warning area it lay under a linked parent alert area) for a date the warning was in
-# force.
+# on a forecast date, in a statement issued on some day. Was the area under an FGS risk
+# polygon when the warning was issued, and was that forecast made before, or only on the day?
+# A polygon is linked to an area (job 07) when it overlapped the area or, for a coastal
+# warning area, lay over a linked parent alert area.
 #
-# BEFORE, ON THE DAY OR AFTER. Compare the day each covering statement was issued with the
-# day the warning was issued:
-#   before    the earliest covering statement was issued on an earlier day. The FGS gave notice.
-#   same day  the earliest was issued on the same day as the warning. It did not give notice,
-#             but it was not late either.
-#   after     the earliest was issued on a later day. The warning came first.
-#   none      no statement covered the area for any date the warning was in force.
-# The earliest covering statement decides, so a warning covered both before and after counts
-# as before. lead_days is how many days earlier that statement was issued.
+# THE REFERENCE IS THE ISSUE DAY. Where there is an impact the FGS keeps a coloured polygon
+# over the area for the whole of the warning, so the polygons on later days say nothing about
+# timing. Only the forecast for the day the warning was issued is compared:
+#   before      a statement issued on an EARLIER day put a polygon over the area for the
+#               issue day. The FGS gave notice. lead_days says how many days earlier.
+#   same_day    the earliest such statement was issued on the issue day itself.
+#   later       no statement covered the issue day, but a polygon covered a LATER day the
+#               warning was in force. The FGS caught up, or the impact came after the issue.
+#   none        no polygon covered the area on any day the warning was in force.
+# Comparison is by day. Hours are not compared, because statement and message times are not
+# held in one zone.
 #
 # THE RISK THRESHOLD. A Very Low polygon covers a great deal of England, so "covered" depends
-# on how serious a polygon must be. The result carries, for each rank 1 to 4, the earliest
-# covering statement at that rank or higher (first_cover_ge1 .. first_cover_ge4). The app
-# chooses the threshold and reads the category from the matching column.
+# on how serious a polygon must be. For each rank 1 to 4 the result carries the earliest
+# statement that covered the issue day at that rank or higher (first_cover_ge1 .. _ge4), and
+# later_rank, the worst rank over the later days. The app chooses the threshold.
 #
-# IN FORCE. A warning counts for every date from its first day to its last. One open for over
-# 30 days (stale_open) most likely never received its "no longer in force" message and counts
-# only for its first day. A span is capped at MAX_SPAN_DAYS so one bad record cannot run for years.
+# IN FORCE. A warning counts for every date from its first day to its last, up to
+# MAX_SPAN_DAYS. One open for over 30 days (stale_open) most likely never received its "no longer
+# in force" message and counts only for its first day.
 #
 # WHAT THIS IS NOT. A warning not under a polygon is not necessarily a missed forecast: the FGS
 # forecasts risk across regions and the EA issues warnings for specific rivers and coasts. It
@@ -40,9 +42,9 @@ import pandas as pd
 MAX_SPAN_DAYS = 60
 RANKS = (1, 2, 3, 4)
 
-COVERAGE_COLUMNS = ["episode_id", "ea_area_code", "area_type", "issue_date", "max_rank", "rank_before",
-                    "rank_same_day", "rank_after", "first_cover_ge1", "first_cover_ge2", "first_cover_ge3",
-                    "first_cover_ge4", "sources"]
+COVERAGE_COLUMNS = ["episode_id", "ea_area_code", "area_type", "issue_date", "max_rank", "issue_day_rank",
+                    "later_rank", "rank_before", "rank_same_day", "first_cover_ge1", "first_cover_ge2",
+                    "first_cover_ge3", "first_cover_ge4", "sources"]
 
 
 def _day(series: pd.Series) -> pd.Series:
@@ -79,8 +81,11 @@ def cover_episodes(episodes: pd.DataFrame, coverage: pd.DataFrame, now) -> pd.Da
                    sources (comma-separated flood sources), one row per area, date and issue day.
 
     Returns:
-        COVERAGE_COLUMNS, one row per episode. A first_cover_ge column is NaT where no statement
-        covered the episode at that rank or higher.
+        COVERAGE_COLUMNS, one row per episode. issue_day_rank is the worst rank any statement
+        gave the area for the issue day; later_rank the worst for any later day in force;
+        max_rank the worst of both; rank_before and rank_same_day split issue_day_rank by whether
+        the statement was issued on an earlier day or on the issue day. A first_cover_ge column is
+        NaT where no statement covered the issue day at that rank or higher.
     """
     days = episode_days(episodes, now)
     base = episodes.dropna(subset=["episode_id", "ea_area_code", "start_time"])[
@@ -93,32 +98,47 @@ def cover_episodes(episodes: pd.DataFrame, coverage: pd.DataFrame, now) -> pd.Da
     m = days.merge(cov, on=["ea_area_code", "d"], how="inner")
 
     out = base.set_index("episode_id")
+    ranks = ("max_rank", "issue_day_rank", "later_rank", "rank_before", "rank_same_day")
     if m.empty:
-        for c in ("max_rank", "rank_before", "rank_same_day", "rank_after"):
+        for c in ranks:
             out[c] = 0
         for r in RANKS:
             out[f"first_cover_ge{r}"] = pd.NaT
         out["sources"] = None
         return out.reset_index()[COVERAGE_COLUMNS]
 
-    m["rel"] = (m["s"] - m["issue_date"]).dt.days
-    g = m.groupby("episode_id")
-    out["max_rank"] = g["rk"].max()
-    out["rank_before"] = m[m["rel"] < 0].groupby("episode_id")["rk"].max()
-    out["rank_same_day"] = m[m["rel"] == 0].groupby("episode_id")["rk"].max()
-    out["rank_after"] = m[m["rel"] > 0].groupby("episode_id")["rk"].max()
+    on_day = m[m["d"] == m["issue_date"]]
+    later = m[m["d"] > m["issue_date"]]
+    out["max_rank"] = m.groupby("episode_id")["rk"].max()
+    out["issue_day_rank"] = on_day.groupby("episode_id")["rk"].max()
+    out["later_rank"] = later.groupby("episode_id")["rk"].max()
+    out["rank_before"] = on_day[on_day["s"] < on_day["issue_date"]].groupby("episode_id")["rk"].max()
+    out["rank_same_day"] = on_day[on_day["s"] >= on_day["issue_date"]].groupby("episode_id")["rk"].max()
     for r in RANKS:
-        out[f"first_cover_ge{r}"] = m[m["rk"] >= r].groupby("episode_id")["s"].min()
-    out["sources"] = g["sources"].agg(lambda s: ",".join(sorted({p for v in s.dropna() for p in str(v).split(",") if p})))
-    for c in ("max_rank", "rank_before", "rank_same_day", "rank_after"):
+        out[f"first_cover_ge{r}"] = on_day[on_day["rk"] >= r].groupby("episode_id")["s"].min()
+    # The sources of the polygons that decide it: the issue day's, else the later days'.
+    src_on = on_day.groupby("episode_id")["sources"].agg(lambda s: _join_sources(s))
+    src_all = m.groupby("episode_id")["sources"].agg(lambda s: _join_sources(s))
+    out["sources"] = src_on.reindex(out.index).where(src_on.reindex(out.index).notna() & (src_on.reindex(out.index) != ""), src_all.reindex(out.index))
+    for c in ranks:
         out[c] = out[c].fillna(0).astype(int)
     out["sources"] = out["sources"].where(out["max_rank"] > 0, None)
     return out.reset_index()[COVERAGE_COLUMNS]
 
 
-def category(issue_date, first_cover) -> str:
-    """before, same_day, after or none, for one episode at one threshold."""
-    if first_cover is None or pd.isna(first_cover):
-        return "none"
-    a, b = pd.Timestamp(first_cover).normalize(), pd.Timestamp(issue_date).normalize()
-    return "before" if a < b else "same_day" if a == b else "after"
+def _join_sources(values) -> str:
+    return ",".join(sorted({p for v in values.dropna() for p in str(v).split(",") if p}))
+
+
+def category(issue_date, first_cover, later_rank=0, rank=1) -> str:
+    """
+    before, same_day, later or none, for one episode at one risk threshold.
+    first_cover is the earliest statement covering the issue day at that rank or higher;
+    later_rank the worst rank over the later days in force.
+    """
+    if first_cover is not None and not pd.isna(first_cover):
+        a, b = pd.Timestamp(first_cover).normalize(), pd.Timestamp(issue_date).normalize()
+        return "before" if a < b else "same_day"
+    if later_rank is not None and not pd.isna(later_rank) and int(later_rank) >= int(rank):
+        return "later"
+    return "none"

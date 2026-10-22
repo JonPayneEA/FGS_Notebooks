@@ -211,7 +211,7 @@ Databricks, and slacken to 30 minutes if they approach 15.
 | `constituency_flood_situation` | Every poll (19) | One row per constituency: worst forecast risk and when, risk by day, escalation flag, warnings and alerts in force, and the MP. |
 | `mp_briefing_drafts` | Every poll (20) | DRAFT briefings for MPs whose constituency is forecast at risk, including how many flood warning and alert areas lie under the forecast. Nothing is sent. `status` starts as `draft`. |
 | `fgs_constituency_exposure` | Daily (21) | Days each constituency sat at each risk rank, by calendar month and flood source. Sparse. |
-| `ea_warning_fgs_coverage` | Daily (26) | Each alert and warning, and whether and when an FGS polygon covered it: the earliest covering statement at each risk rank, and the worst risk from statements issued before, on and after the warning. |
+| `ea_warning_fgs_coverage` | Daily (26) | Each alert and warning, and whether and when an FGS polygon covered its issue day: the earliest covering statement at each risk rank, and the worst rank on the issue day and on later days. |
 | `pipeline_health` | Every poll (22) | One row per health check (age and completeness of the outputs, including the age of the live readings), plus an overall row. |
 | `ea_administrative_areas` | Manual | EA and Natural England administrative boundaries. |
 | `ea_rt_stations` | Manual (15) | Every EA real-time station, one row per station, from the stations API. |
@@ -1004,22 +1004,28 @@ ORDER BY duration_hours DESC LIMIT 20;
 ## Warning coverage: were the warnings under an FGS polygon?
 
 `jobs/26_warning_fgs_coverage` takes each flood alert and warning (an episode from `25`) and
-records whether the FGS covered it, and when. It writes `ea_warning_fgs_coverage`, one row per
+records whether the FGS covered it when it was issued, and when that forecast was made. It writes `ea_warning_fgs_coverage`, one row per
 episode. The Flood Planning App's Warnings vs FGS tab reads it.
 
 - **Covered.** An area is covered when an FGS risk polygon was linked to it
-  (`fgs_ea_area_intersections`, job `07`) for a date the warning was in force. That link is an
+  (`fgs_ea_area_intersections`, job `07`) for a date the warning was in force (the issue day decides timing, below). That link is an
   overlap, or, for a coastal warning area, a link through its parent alert area (no overlap
   share). Every complete statement counts, amendments included.
-- **Before, on the day, or after.** The day each covering statement was issued is compared with
-  the day the warning was issued. The earliest covering statement decides: earlier is *before*
-  (the FGS gave notice), the same day is *same day*, later is *after* (the warning came first),
-  none is *not covered*. `first_cover_ge1` to `first_cover_ge4` hold that earliest day at each
-  risk rank or higher (1 Very Low to 4 High), because a Very Low polygon covers a great deal of
-  England, so "covered" depends on how serious a polygon must be. The app picks the threshold.
-- **Other columns.** `max_rank` is the worst rank over any covering statement. `rank_before`,
-  `rank_same_day` and `rank_after` are the worst from statements issued before, on and after the
-  warning's issue day. `sources` lists the flood sources of the covering polygons.
+- **The issue day is the reference.** Where there is an impact the FGS keeps a coloured polygon
+  over the area for the whole of the warning, so polygons on later days say nothing about
+  timing. Only the forecast for the day the warning was issued is compared. The day each covering
+  statement was issued is compared with the issue day, and the earliest decides: an earlier day is
+  *before* (the FGS gave notice, and by how many days), the same day is *same day*. If no
+  statement covered the issue day but a polygon covered a later day the warning was in force, it
+  is *later days only*, and if none covered any day, *not covered*. Days are compared, not hours,
+  because statement and message times are not held in one zone. `first_cover_ge1` to
+  `first_cover_ge4` hold the earliest statement covering the issue day at each risk rank or higher
+  (1 Very Low to 4 High), because a Very Low polygon covers a great deal of England, so "covered"
+  depends on how serious a polygon must be. The app picks the threshold.
+- **Other columns.** `issue_day_rank` and `later_rank` are the worst rank on the issue day and on
+  later days; `max_rank` is the worst of both. `rank_before` and `rank_same_day` split
+  `issue_day_rank` by whether the statement was issued on an earlier day or on the issue day.
+  `sources` lists the flood sources of the deciding polygons.
 - **In force.** A warning counts for every date from its first day to its last, up to 60 days. One
   open for over 30 days (`stale_open`) counts only for its first day.
 - **What it is not.** The FGS forecasts risk across regions; the EA issues warnings for specific
@@ -1028,13 +1034,13 @@ episode. The Flood Planning App's Warnings vs FGS tab reads it.
 
 It runs daily as step 3 of `Master_daily`, after the episodes that step 10 of `Master_polling`
 keeps current, and prints, for each risk level, the share of all warnings covered before, on the
-day, after, and not at all. Read that before trusting the table.
+day, on later days only, and not at all. Read that before trusting the table.
 
 ```sql
 -- Medium or above: how were warnings issued in 2025 covered?
-SELECT CASE WHEN first_cover_ge3 IS NULL THEN 'not covered'
-            WHEN first_cover_ge3 < issue_date THEN 'before'
-            WHEN first_cover_ge3 = issue_date THEN 'same day' ELSE 'after' END AS coverage,
+SELECT CASE WHEN first_cover_ge3 < issue_date THEN 'before'
+            WHEN first_cover_ge3 IS NOT NULL THEN 'same day'
+            WHEN later_rank >= 3 THEN 'later days only' ELSE 'not covered' END AS coverage,
        COUNT(*) AS warnings
 FROM prd_dash_lab.flood_forecasting_unrestricted.ea_warning_fgs_coverage
 WHERE issue_date BETWEEN '2025-01-01' AND '2025-12-31'
