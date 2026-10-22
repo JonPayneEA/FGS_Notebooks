@@ -16,6 +16,8 @@
 #   candidate_summary    how many rows each route would have found.
 #   classify_ambiguity   why several measures fit one row (two periods, two qualifiers ...), and
 #                        whether a simple rule would settle it.
+#   stage_pairs          the ambiguous rows that are just a Stage and a Downstream Stage, and what the
+#                        file says about them (one row, or a row for each).
 #   unmapped_measures    register measures no matched row points at, and why.
 #   matched_name_check   matched rows whose gauge name and station name disagree: possible wrong
 #                        matches, for a person to look at.
@@ -175,6 +177,50 @@ def classify_ambiguity(rows: pd.DataFrame) -> pd.DataFrame:
                     "periods": " | ".join(sorted(periods)), "settled_by_shortest_period": len(shortest) == 1})
     return pd.DataFrame(out, columns=["id", "telemetry_id", "telemetry_parameter", "parameter_qualifier", "candidates", "why",
                                       "qualifiers", "periods", "settled_by_shortest_period"])
+
+
+_STAGE_PAIR = {"stage", "downstream stage"}
+
+
+def stage_pairs(rows: pd.DataFrame) -> pd.DataFrame:
+    """
+    The ambiguous mapping rows where the candidate measures are a Stage and a Downstream Stage and
+    nothing else, with what the FILE says about that station:
+        file_rows           how many rows of the file share the TelemetryID and the parameter family
+        file_qualifiers     the ParameterQualifier each of those rows carries
+        wiski_ids, fffs_ids the distinct WISKI and FFFS ids on those rows
+        file_describes      one_row_no_qualifier (the file does not say which measure it means),
+                            distinct_qualifiers (a row each for Stage and Downstream Stage: the
+                            qualifier should have settled it, so look for a spelling difference),
+                            same_qualifier (several rows with one qualifier) or other
+    """
+    amb = rows[rows["match_status"] == "ambiguous"]
+    out = []
+    for rid, g in amb.groupby("id"):
+        quals = {(q or "").strip().lower() for q in g["register_qualifier"]}
+        if quals != _STAGE_PAIR:
+            continue
+        tid = g["telemetry_id"].iloc[0]
+        fam = g["telemetry_family"].iloc[0] if "telemetry_family" in g else None
+        same = rows[(rows["telemetry_id"] == tid)].drop_duplicates("id")
+        if fam is not None and "telemetry_family" in same:
+            same = same[same["telemetry_family"].fillna("") == (fam or "")]
+        fq = [(q or "").strip() for q in same["parameter_qualifier"]]
+        filled = {q.lower() for q in fq if q}
+        if len(same) == 1 and not fq[0]:
+            describes = "one_row_no_qualifier"
+        elif len(same) > 1 and filled == _STAGE_PAIR:
+            describes = "distinct_qualifiers"
+        elif len(same) > 1 and len(filled) <= 1:
+            describes = "same_qualifier"
+        else:
+            describes = "other"
+        out.append({"telemetry_id": tid, "file_rows": len(same), "file_qualifiers": " | ".join(sorted({q or "(blank)" for q in fq})),
+                    "wiski_ids": " | ".join(sorted({str(w) for w in same["wiski_id"].dropna()})),
+                    "fffs_ids": " | ".join(sorted({str(w) for w in same["fffs_id"].dropna()})),
+                    "file_describes": describes})
+    cols = ["telemetry_id", "file_rows", "file_qualifiers", "wiski_ids", "fffs_ids", "file_describes"]
+    return pd.DataFrame(out, columns=cols).drop_duplicates("telemetry_id").reset_index(drop=True)
 
 
 def unmapped_measures(register: pd.DataFrame, rows: pd.DataFrame) -> pd.DataFrame:

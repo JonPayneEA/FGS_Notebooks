@@ -8,8 +8,8 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.mapping_diagnostics import (  # noqa: E402
-    candidate_summary, classify_ambiguity, matched_name_check, name_similarity, station_candidates, tidy_id,
-    unmapped_measures,
+    candidate_summary, classify_ambiguity, matched_name_check, name_similarity, stage_pairs, station_candidates,
+    tidy_id, unmapped_measures,
 )
 
 STATIONS = pd.DataFrame({
@@ -89,3 +89,31 @@ def test_matched_rows_with_disagreeing_names_are_listed():
                        "telemetry_parameter": ["x"] * 3, "fffs_location_name": ["Aldwyn Bridge", "Aldwyn Bridge", "Q"],
                        "station_label": ["Aldwyn Bridge", "Totally Elsewhere", None], "measure_uri": ["m1", "m2", None]})
     assert list(matched_name_check(mr)["telemetry_id"]) == ["2"]
+
+
+def stage_rows(file_rows):
+    """file_rows: (id, telemetry_id, qualifier, wiski_id) -> the output of a match where Stage and Downstream Stage both fit."""
+    recs = []
+    for rid, tid, q, w in file_rows:
+        for rq in ("Stage", "Downstream Stage"):
+            recs.append({"id": rid, "telemetry_id": tid, "match_status": "ambiguous", "telemetry_family": "level",
+                         "telemetry_parameter": "Water Level", "parameter_qualifier": q, "register_qualifier": rq,
+                         "period": "900", "wiski_id": w, "fffs_id": "F" + tid})
+    return pd.DataFrame(recs)
+
+
+def test_stage_and_downstream_stage_are_found_and_described():
+    one = stage_pairs(stage_rows([("a", "T1", None, "W1")]))
+    assert list(one["file_describes"]) == ["one_row_no_qualifier"] and one.loc[0, "wiski_ids"] == "W1"
+    two = stage_pairs(stage_rows([("a", "T2", "Stage", "W2"), ("b", "T2", "Downstream Stage", "W2")]))
+    assert list(two["file_describes"]) == ["distinct_qualifiers"] and two.loc[0, "wiski_ids"] == "W2"   # shared WISKI id
+    assert two.loc[0, "file_qualifiers"] == "Downstream Stage | Stage"
+    same = stage_pairs(stage_rows([("a", "T3", "Stage", "W3"), ("b", "T3", "Stage", "W4")]))
+    assert list(same["file_describes"]) == ["same_qualifier"] and same.loc[0, "wiski_ids"] == "W3 | W4"
+
+
+def test_other_ambiguities_are_not_stage_pairs():
+    amb2 = pd.DataFrame([{"id": "a", "telemetry_id": "T", "match_status": "ambiguous", "telemetry_family": "level",
+                          "telemetry_parameter": "x", "parameter_qualifier": None, "register_qualifier": q, "period": "900",
+                          "wiski_id": "W", "fffs_id": "F"} for q in ("Stage", "Tidal Level")])
+    assert stage_pairs(amb2).empty
