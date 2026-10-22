@@ -216,7 +216,9 @@ Databricks, and slacken to 30 minutes if they approach 15.
 | `ea_administrative_areas` | Manual | EA and Natural England administrative boundaries. |
 | `ea_rt_stations` | Manual (15) | Every EA real-time station, one row per station, from the stations API. |
 | `ea_rt_station_measures` | Manual (15) | One row per measure, keyed by `stationReference`. |
-| `ea_rt_wiski_lookup` | Manual (16) | Measures matched to WISKI ids from the externally supplied lookup CSV. |
+| `ea_rt_telemetry_mapping` | Manual (16) | The telemetry mapping file (TelemetryID, FFFS id, WISKI id, gauge name), each row matched to a measure on station and parameter, with a status and a reason. |
+| `ea_rt_measures_mapped` (view) | Manual (16) | The measure register with each measure's gauge name, FFFS id and WISKI id. |
+| `ea_rt_wiski_lookup` (view) | Manual (16) | Matched measures that carry a WISKI id. Was a station-only join; now a view over the telemetry mapping. |
 | `ea_thresholds_all` | Manual (17) | Flood thresholds from the restricted volume. Lives in the restricted schema, `flood_forecasting_restricted`. |
 
 ### Risk matrix labels
@@ -1160,7 +1162,7 @@ ones. See "History is an archive" above.
 │   ├── 26_warning_fgs_coverage        Whether each alert and warning was under an FGS polygon, and when
 │   ├── 12_ea_area_boundaries_download EA administrative boundaries (manual)
 │   ├── 15_rt_station_measure_register All EA stations and measures (manual)
-│   ├── 16_build_wiski_lookup          Measures x WISKI ids from an external CSV (manual)
+│   ├── 16_build_wiski_lookup          Telemetry mapping matched to measures: gauge names, FFFS and WISKI ids (manual)
 │   └── 17_build_thresholds_table      Flood thresholds into the restricted schema (manual)
 ├── master/                            Schedule these notebooks
 │   ├── Master_polling, Master_daily, Master_weekly, Master_quarterly
@@ -1200,21 +1202,46 @@ Licence attribution wherever the readings are shown.
 These three are run by hand when their source changes. No master or workflow calls
 them, and the FGS pipeline does not depend on them. Their paths and table names
 live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
-`TBL_WISKI_LOOKUP`, `TBL_EA_THRESHOLDS`, `WISKI_LOOKUP_CSV`, `THRESHOLDS_CSV`).
+`TBL_WISKI_LOOKUP`, `TBL_TELEMETRY_MAPPING`, `TBL_MEASURES_MAPPED`, `TBL_EA_THRESHOLDS`,
+`WISKI_MAPPING_CSV`, `THRESHOLDS_CSV`).
 
 - **15** fetches every station in one bulk call. Job `09` makes about 3,000
   separate station calls for similar information. Where those calls time out, `09`
   now fills registered stations that have no enrichment from `ea_rt_stations` in
   one query (run 15 first). That table has no `ea_region_name`, `ea_area_name` or
   `datum`, so those stay empty for stations filled this way.
-- **16** joins `ea_rt_measure_register` to the WISKI CSV on station only. A station
-  has several measures, and the lookup may have a row per parameter, so a measure
-  can pick up another parameter's WISKI id. The notebook prints a warning when the
-  matched rows exceed the distinct measures. Check after each run:
+- **16** matches the telemetry mapping file (`WISKI_Mapping.csv`, in the unrestricted
+  external volume) to the measures in `ea_rt_measure_register`, so each measure carries its
+  real gauge name, FFFS id and WISKI id.
+  - **The key.** `TelemetryID` is the equivalent of `stationReference`, which every measure
+    carries. A station has several measures and one `TelemetryID` can stand for several
+    parameters (Bewdley has a flow and a stage, both `2001`), so a row is matched on the
+    station and on what is measured. `TelemetryParameter` (Water Level, Rainfall, Flow ...)
+    and the `ParameterID` prefix (`H`, `Q`, `P`, `GW` ...) each name a family; the register's
+    parameter and qualifier are reduced to the same families. If the two columns disagree the
+    row is a conflict and is not matched. A station with one measure is not matched on the
+    station alone. The rules are in `utils/telemetry_mapping.py`.
+  - **`ea_rt_telemetry_mapping`** holds every row of the file with its `match_status`
+    (`matched`, `ambiguous` with one line per candidate, `conflict`, `unknown_parameter`,
+    `no_station`, `no_parameter`, `no_telemetry_id`), a note saying why, and the measure it
+    matched. Use only `matched` rows as the link. `fffs_id` is the key to the thresholds.
+  - **`ea_rt_measures_mapped`** (a view) is the register with `gauge_name` (the file's
+    `FFFSLocName`), `fffs_id`, `n_fffs_ids`, `wiski_id` and `wiski_parameter` where a measure
+    matched. A measure wanted by two rows takes the lowest ids and counts them.
+  - **`ea_rt_wiski_lookup`** is now a view over the matched rows that carry a WISKI id. It used
+    to be a table built by joining on station alone, so a flow measure could carry a stage
+    gauge's WISKI id. The notebook will not drop the old table unless the `replace_old_table`
+    widget is `true`; until then it prints that the table is still the old one.
+  - **The file.** Read as text, so IDs keep their form. A WISKI id Excel has turned into
+    scientific notation (`4.53E+08`) has lost digits and is blanked, with a count printed:
+    re-save the column as text. Read the printed counts and every conflict, ambiguity and
+    unmatched row before trusting the table.
 
   ```sql
-  SELECT COUNT(*) AS total_rows, COUNT(DISTINCT measure_uri) AS distinct_measures
-  FROM prd_dash_lab.flood_forecasting_unrestricted.ea_rt_wiski_lookup;
+  -- How the mapping rows matched.
+  SELECT match_status, COUNT(*) AS rows
+  FROM prd_dash_lab.flood_forecasting_unrestricted.ea_rt_telemetry_mapping
+  GROUP BY match_status ORDER BY rows DESC;
   ```
 
 - **17** loads the thresholds CSV into the restricted schema. Keep it out of joins
