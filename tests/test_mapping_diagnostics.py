@@ -8,8 +8,8 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.mapping_diagnostics import (  # noqa: E402
-    candidate_summary, classify_ambiguity, matched_name_check, name_similarity, stage_pairs, station_candidates,
-    tidy_id, unmapped_measures,
+    candidate_measures, candidate_summary, classify_ambiguity, matched_name_check, name_similarity, stage_pairs,
+    station_candidates, tidal_summary, tidy_id, unmapped_measures,
 )
 
 STATIONS = pd.DataFrame({
@@ -133,3 +133,19 @@ def test_a_route_that_finds_only_stations_without_readings_is_separated_from_one
     # Without the register the split is simply unknown, not wrong.
     c = station_candidates(rows([("a", "7001", None, "x")]), STATIONS)
     assert c["candidate_in_register"].isna().all()
+
+
+def test_a_name_match_reaches_stations_whose_measures_differ_only_in_value_type():
+    stations = pd.DataFrame({"stationReference": ["E71139", "E71124", "L3360"], "notation": ["E71139", "E71124", "L3360"],
+                             "label": ["Immingham", "Immingham", "Immingham"], "RLOIid": [None] * 3, "wiskiID": [None] * 3})
+    reg = pd.DataFrame({"measure_uri": ["m1", "m2", "m3", "m4"], "station_reference": ["E71139", "E71139", "E71124", "L3360"],
+                        "parameter": ["level"] * 4, "qualifier": ["Tidal Level"] * 3 + ["Stage"],
+                        "value_type": ["instantaneous", "mean", "instantaneous", "instantaneous"], "period": ["900"] * 4,
+                        "unit_name": ["mAOD"] * 4})
+    r = rows([("a", "5338N011W", None, "Immingham")])
+    cands = station_candidates(r, stations, max_per_row=5, register_refs=reg["station_reference"])
+    assert set(cands["how"]) == {"similar name"} and len(cands) == 3
+    cm = candidate_measures(cands, reg)
+    assert len(cm) == 4 and cm["tidal"].tolist().count(True) == 3
+    ts = tidal_summary(cm).iloc[0]
+    assert ts["stations"] == 3 and ts["measures"] == 4 and bool(ts["any_tidal"]) and ts["value_types"] == "instantaneous | mean"

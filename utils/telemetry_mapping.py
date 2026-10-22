@@ -25,6 +25,11 @@
 # then digits at the end, is tried with an underscore when the ID as written is not a station reference,
 # and the note on the row says so. Any other ID with a space is left exactly as written.
 #
+# INACTIVE SITES. A location name with "INACTIVE" in it (Pevensey INACTIVE) is a gauge the file itself
+# says is no longer in use. A row like that which did not match anything is set aside with the status
+# inactive and takes no part in the counts of what is missing. One that DID match a live measure stays
+# matched, with a note, because a real match is not thrown away on the strength of a name.
+#
 # SETTLING BY READINGS. A station can list two measures of the same kind of which only one ever
 # delivers data (a retired or duplicate entry). settle_by_readings() takes the readings each candidate
 # has: if exactly one candidate has any readings it is chosen, and if several have but exactly one has
@@ -41,6 +46,7 @@
 #   no_station       no measure in the register has that station reference
 #   no_parameter     the station is there but has no measure of that family
 #   no_telemetry_id  the row has no TelemetryID
+#   inactive         the location name says INACTIVE and the row matched nothing
 # =============================================================================
 
 import re
@@ -167,6 +173,32 @@ def prepare_register(register: pd.DataFrame) -> pd.DataFrame:
     return r
 
 
+def flag_inactive(rows: pd.DataFrame) -> pd.DataFrame:
+    """
+    Set aside mapping rows whose FFFS location name says INACTIVE and that matched nothing: one line
+    each, status inactive, no measure. A row that matched a measure is left matched and its note says
+    the name says INACTIVE.
+    """
+    if rows.empty or "fffs_location_name" not in rows:
+        return rows
+    inactive = rows["fffs_location_name"].fillna("").str.contains("inactive", case=False)
+    if not inactive.any():
+        return rows
+    r = rows.copy()
+    matched_ids = set(r.loc[inactive & (r["match_status"] == "matched"), "id"])
+    keep_matched = inactive & r["id"].isin(matched_ids)
+    r.loc[keep_matched, "match_note"] = r.loc[keep_matched, "match_note"].fillna("").map(
+        lambda n: (n + "; " if n else "") + "the location name says INACTIVE")
+    setting_aside = inactive & ~r["id"].isin(matched_ids)
+    first = setting_aside & ~r.duplicated("id")                       # one line per mapping row
+    for col in ("measure_uri", "station_reference", "station_label", "register_parameter", "register_qualifier", "period", "unit_name"):
+        if col in r:
+            r.loc[first, col] = None
+    r.loc[first, "match_status"] = "inactive"
+    r.loc[first, "match_note"] = "the location name says INACTIVE and nothing matched"
+    return r[~(setting_aside & ~first)].reset_index(drop=True)
+
+
 def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
     """
     Match each mapping row to measures in the register.
@@ -233,6 +265,7 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
                 add(row, "ambiguous", "; ".join(x for x in (f"{len(cands)} {family} measures fit", id_note) if x), c)
 
     rows = pd.DataFrame(out)
+    rows = flag_inactive(rows)
     counts = rows["match_status"].value_counts().to_dict() if len(rows) else {}
     matched = rows[rows["match_status"] == "matched"] if len(rows) else rows
     shared = matched.groupby("measure_uri")["id"].count() if len(matched) else pd.Series(dtype=int)

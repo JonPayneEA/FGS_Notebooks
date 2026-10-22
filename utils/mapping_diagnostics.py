@@ -245,6 +245,45 @@ def stage_pairs(rows: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out, columns=cols).drop_duplicates("telemetry_id").reset_index(drop=True)
 
 
+def candidate_measures(candidates: pd.DataFrame, register: pd.DataFrame) -> pd.DataFrame:
+    """
+    The measures behind each candidate station, so a name-based candidate can be judged: its
+    parameter, qualifier, value type (instantaneous, mean ...), period and unit, and whether it is a
+    tidal level. One line per candidate measure. A station reached by name often has several
+    measures that differ only in value type, which is what makes a name match ambiguous.
+    """
+    cols = ["id", "telemetry_id", "fffs_location_name", "how", "candidate_station_reference", "candidate_label", "measure_uri",
+            "parameter", "qualifier", "value_type", "period", "unit_name", "tidal"]
+    if candidates.empty:
+        return pd.DataFrame(columns=cols)
+    reg = register.copy()
+    for c in ("value_type", "unit_name", "qualifier", "parameter", "period"):
+        if c not in reg:
+            reg[c] = None
+    reg["_ref"] = reg["station_reference"].map(clean)
+    out = candidates.assign(_ref=candidates["candidate_station_reference"].map(clean)).merge(
+        reg[["_ref", "measure_uri", "parameter", "qualifier", "value_type", "period", "unit_name"]], on="_ref", how="left")
+    out["tidal"] = (out["qualifier"].fillna("").str.contains("tidal", case=False)
+                    | out["parameter"].fillna("").str.contains("tidal", case=False))
+    return out[cols]
+
+
+def tidal_summary(cand_measures: pd.DataFrame) -> pd.DataFrame:
+    """
+    For rows reached by a similar name: how many have candidate stations that are tidal, and how many
+    distinct stations each row reaches (the same place often has several: instantaneous, mean ...).
+    """
+    cm = cand_measures
+    if cm.empty:
+        return pd.DataFrame(columns=["id", "stations", "measures", "any_tidal", "value_types"])
+    g = cm.groupby("id")
+    return pd.DataFrame({
+        "stations": g["candidate_station_reference"].nunique(),
+        "measures": g["measure_uri"].nunique(),
+        "any_tidal": g["tidal"].any(),
+        "value_types": g["value_type"].agg(lambda s: " | ".join(sorted({str(v) for v in s.dropna()})))}).reset_index()
+
+
 def unmapped_measures(register: pd.DataFrame, rows: pd.DataFrame) -> pd.DataFrame:
     """
     Register measures that no matched mapping row points at, each with the family it is and why it is
