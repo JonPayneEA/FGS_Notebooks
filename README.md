@@ -1222,7 +1222,10 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     row is a conflict and is not matched, with one exception: a groundwater gauge is called
     "Water Level" in `TelemetryParameter` and `GW.obs` in `ParameterID`, and the code is the more
     specific, so that pair is a groundwater measure, not a conflict. A station with one measure is
-    not matched on the station alone. The rules are in `utils/telemetry_mapping.py`.
+    not matched on the station alone. A telemetry ID written with a space where the station
+    reference has an underscore (`067033_TG 148` for `067033_TG_148`) is matched after changing
+    each space to an underscore, and the row's note says so. The rules are in
+    `utils/telemetry_mapping.py`.
   - **`ea_rt_telemetry_mapping`** holds every row and every column of the file. The columns it
     uses by name keep clean names; any other column (a station name, say) is kept as text as
     `src_<column>`, and `wiski_id_in_file` is the WISKI id exactly as the file holds it (the clean

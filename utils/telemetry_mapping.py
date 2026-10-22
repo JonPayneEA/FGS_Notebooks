@@ -20,6 +20,10 @@
 # same families. A station with one measure is not matched on the station alone, because that
 # is the mistake this replaces.
 #
+# SPACES IN THE ID. Some telemetry IDs are written with a space where the station reference has an
+# underscore ("067033_TG 148" for "067033_TG_148"). When the ID as written is not a station reference,
+# the same ID with each space changed to an underscore is tried, and the note on the row says so.
+#
 # SETTLING BY READINGS. A station can list two measures of the same kind of which only one ever
 # delivers data (a retired or duplicate entry). settle_by_readings() takes the readings each candidate
 # has: if exactly one candidate has any readings it is chosen, and if several have but exactly one has
@@ -200,7 +204,12 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
         if family is None:
             add(row, "unknown_parameter", "neither TelemetryParameter nor ParameterID names a known parameter")
             continue
-        station = by_station.get(tid)
+        station, id_note = by_station.get(tid), ""
+        if station is None and " " in tid:
+            underscored = re.sub(r"\s+", "_", tid)
+            station = by_station.get(underscored)
+            if station is not None:
+                id_note = f"TelemetryID matched as {underscored} (spaces changed to underscores)"
         if station is None:
             add(row, "no_station", "no measure in the register has this station reference")
             continue
@@ -214,10 +223,10 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
             if len(same) >= 1:
                 cands = same
         if len(cands) == 1:
-            add(row, "matched", "", cands.iloc[0].to_dict())
+            add(row, "matched", id_note, cands.iloc[0].to_dict())
         else:
             for c in cands.to_dict("records"):
-                add(row, "ambiguous", f"{len(cands)} {family} measures fit", c)
+                add(row, "ambiguous", "; ".join(x for x in (f"{len(cands)} {family} measures fit", id_note) if x), c)
 
     rows = pd.DataFrame(out)
     counts = rows["match_status"].value_counts().to_dict() if len(rows) else {}
