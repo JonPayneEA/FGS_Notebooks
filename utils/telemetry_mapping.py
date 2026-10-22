@@ -20,9 +20,10 @@
 # same families. A station with one measure is not matched on the station alone, because that
 # is the mistake this replaces.
 #
-# SPACES IN THE ID. Some telemetry IDs are written with a space where the station reference has an
-# underscore ("067033_TG 148" for "067033_TG_148"). When the ID as written is not a station reference,
-# the same ID with each space changed to an underscore is tried, and the note on the row says so.
+# THE _TG SPACE. Rain gauge telemetry IDs are written with a space before the number where the station
+# reference has an underscore ("067033_TG 148" for "067033_TG_148"). That ONE pattern, "_TG" then a space
+# then digits at the end, is tried with an underscore when the ID as written is not a station reference,
+# and the note on the row says so. Any other ID with a space is left exactly as written.
 #
 # SETTLING BY READINGS. A station can list two measures of the same kind of which only one ever
 # delivers data (a retired or duplicate entry). settle_by_readings() takes the readings each candidate
@@ -65,6 +66,8 @@ _TEXT_FAMILIES = [("groundwater", "groundwater"), ("wave", "wave"), ("shingle", 
 _CODE_FAMILIES = {"h": "level", "q": "flow", "p": "rainfall", "gw": "groundwater", "wave": "wave", "shingle": "shingle"}
 
 _SCIENTIFIC = re.compile(r"^\d+(\.\d+)?[eE][+-]?\d+$")
+# "067033_TG 148": a space between _TG and the number that ends the ID. Nothing else is rewritten.
+_TG_SPACE = re.compile(r"(_TG)\s+(\d+)$", re.IGNORECASE)
 
 
 def _none(value):
@@ -205,11 +208,12 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
             add(row, "unknown_parameter", "neither TelemetryParameter nor ParameterID names a known parameter")
             continue
         station, id_note = by_station.get(tid), ""
-        if station is None and " " in tid:
-            underscored = re.sub(r"\s+", "_", tid)
-            station = by_station.get(underscored)
-            if station is not None:
-                id_note = f"TelemetryID matched as {underscored} (spaces changed to underscores)"
+        if station is None:
+            underscored = _TG_SPACE.sub(r"\1_\2", tid)
+            if underscored != tid:
+                station = by_station.get(underscored)
+                if station is not None:
+                    id_note = f"TelemetryID matched as {underscored} (the space after _TG changed to an underscore)"
         if station is None:
             add(row, "no_station", "no measure in the register has this station reference")
             continue

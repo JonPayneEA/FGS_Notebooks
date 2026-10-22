@@ -168,17 +168,21 @@ def test_matched_rows_get_their_readings_and_unmatched_rows_none():
     assert by.loc["a", "n_readings"] == 5 and pd.isna(by.loc["b", "n_readings"])
 
 
-def test_a_space_in_the_telemetry_id_matches_the_station_with_an_underscore():
+def test_only_the_space_after_tg_becomes_an_underscore():
     reg = register([("m/tg", "067033_TG_148", "rainfall", "Tipping Bucket Raingauge", "900"),
-                    ("m/lv", "VCHURCH-T_TG_341", "level", "Stage", "900")])
+                    ("m/lv", "VCHURCH-T_TG_341", "level", "Stage", "900"),
+                    ("m/sp", "Some_Name_12", "level", "Stage", "900")])
     rows, _ = match_mapping(mapping([("a", "F1", "Chester Sus Bridge", "P.obs", "067033_TG 148", "Rainfall", None, "1"),
-                                     ("b", "F2", "Vowchurch", "H.obs", "VCHURCH-T_TG 341", "Water Level", None, "2")]), reg)
+                                     ("b", "F2", "Vowchurch", "H.obs", "VCHURCH-T_TG 341", "Water Level", None, "2"),
+                                     ("e", "F5", "Other", "H.obs", "Some Name 12", "Water Level", None, "5")]), reg)
     by = rows.set_index("id")
     assert by.loc["a", "match_status"] == "matched" and by.loc["a", "measure_uri"] == "m/tg"
-    assert "spaces changed to underscores" in by.loc["a", "match_note"] and by.loc["b", "measure_uri"] == "m/lv"
+    assert "after _TG" in by.loc["a", "match_note"] and by.loc["b", "measure_uri"] == "m/lv"
+    # Any other ID with a space is NOT rewritten, even though an underscore version exists.
+    assert by.loc["e", "match_status"] == "no_station" and pd.isna(by.loc["e", "measure_uri"])
     # An ID that already matches as written is left alone, and one that matches neither way is still no_station.
     rows, _ = match_mapping(mapping([("c", "F", "G", "P.obs", "067033_TG_148", "Rainfall", None, "1"),
-                                     ("d", "F", "G", "P.obs", "067033 XX 1", "Rainfall", None, "1")]), reg)
+                                     ("d", "F", "G", "P.obs", "067033 TG 148 X", "Rainfall", None, "1")]), reg)
     by = rows.set_index("id")
     assert by.loc["c", "match_status"] == "matched" and by.loc["c", "match_note"] == ""
     assert by.loc["d", "match_status"] == "no_station"
