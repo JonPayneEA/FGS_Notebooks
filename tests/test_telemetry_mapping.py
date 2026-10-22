@@ -8,7 +8,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.telemetry_mapping import (  # noqa: E402
-    clean, family_of_code, family_of_text, match_mapping, prepare_mapping, reconcile_family,
+    clean, family_of_code, family_of_text, match_mapping, prepare_mapping, reconcile_family, settle_by_readings,
 )
 
 
@@ -123,3 +123,46 @@ def test_extra_columns_survive_the_match():
     rows, _ = match_mapping(m, REG)
     assert rows.loc[0, "src_station_name"] == "Cwm Rheidol" and rows.loc[0, "src_notes_free_text"] == "check datum"
     assert rows.loc[0, "match_status"] == "matched"
+
+
+NOW = pd.Timestamp("2026-10-22 12:00")
+
+
+def twin_stations():
+    """Telemetry 023041 lists two level measures; only one ever delivers readings."""
+    reg = register([("m/live", "023041", "level", "Stage", "900"), ("m/dead", "023041", "level", "Stage", "900")])
+    rows, _ = match_mapping(mapping([("a", "F1", "Gauge", "H.obs", "023041", "Water Level", "Stage", "9")]), reg)
+    return rows
+
+
+def activity(items):
+    return pd.DataFrame(items, columns=["measure_uri", "n_readings", "first_reading", "last_reading"])
+
+
+def test_leading_zero_telemetry_ids_are_kept_and_a_dead_twin_is_dropped_by_readings():
+    rows = twin_stations()
+    assert list(rows["match_status"]) == ["ambiguous", "ambiguous"] and rows.loc[0, "telemetry_id"] == "023041"
+    out, settled = settle_by_readings(rows, activity([("m/live", 900, "2020-01-01", "2026-10-22 11:45")]), NOW)
+    assert settled == 1 and list(out["measure_uri"]) == ["m/live"] and list(out["match_status"]) == ["matched"]
+    assert "settled by readings" in out.loc[0, "match_note"] and out.loc[0, "n_readings"] == 900
+
+
+def test_two_measures_with_data_are_settled_only_if_one_is_recent():
+    rows = twin_stations()
+    both = activity([("m/live", 900, "2020-01-01", "2026-10-22 11:45"), ("m/dead", 50, "2015-01-01", "2016-03-01")])
+    out, settled = settle_by_readings(rows, both, NOW)
+    assert settled == 1 and list(out["measure_uri"]) == ["m/live"]
+    still = activity([("m/live", 900, "2020-01-01", "2026-10-22 11:45"), ("m/dead", 900, "2020-01-01", "2026-10-21 11:45")])
+    out, settled = settle_by_readings(rows, still, NOW)
+    assert settled == 0 and list(out["match_status"]) == ["ambiguous", "ambiguous"]      # both live: not guessed
+    assert list(out["n_readings"]) == [900, 900]
+    out, settled = settle_by_readings(rows, activity([]), NOW)                            # neither has data
+    assert settled == 0 and list(out["n_readings"]) == [0, 0]
+
+
+def test_matched_rows_get_their_readings_and_unmatched_rows_none():
+    reg = register([("m/1", "S1", "level", "Stage", "900")])
+    rows, _ = match_mapping(mapping([("a", "F", "G", "H.obs", "S1", "Water Level", None, "1"), ("b", "F", "G", "H.obs", "NOPE", "Water Level", None, "1")]), reg)
+    out, _ = settle_by_readings(rows, activity([("m/1", 5, "2026-01-01", "2026-10-21")]), NOW)
+    by = out.set_index("id")
+    assert by.loc["a", "n_readings"] == 5 and pd.isna(by.loc["b", "n_readings"])
