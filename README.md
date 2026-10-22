@@ -1259,6 +1259,15 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     re-save the column as text. Read the printed counts and every conflict, ambiguity and
     unmatched row before trusting the table.
 
+  - **Tide gauges by position.** Tide gauge TelemetryIDs such as `5338N011W` are positions: 53 deg 38 min
+    N, 0 deg 11 min W (Immingham). The digits are not padded, so every plausible reading is tried and the one
+    nearest a station is used. For each such row the notebook finds the stations in `ea_rt_stations` within
+    3 km and accepts one only where its NAME agrees as well (`name and position`). It then takes that
+    station's tidal level measures that are instantaneous (the thresholds are for instantaneous levels, not
+    means), and leaves several for the readings to settle. A station whose tidal measures are all means is left
+    unmatched; where the register gives no value type at all, the tidal measures are all kept. The note says "matched by name and position" with the station
+    and distance. Position alone (the wrong name) is shown in the explore notebook and never matched. The
+    `match_tidal_by_position` widget switches it off. The logic is in `utils/tidal_position.py`.
   - **Setting aside sites outside the feed.** Welsh sites, among others, are not in the real-time
     feed and can never match, which swamps the counts of what is missing. The `out_of_scope_csv`
     widget takes a CSV with an `FFFS_ID` and/or `TelemetryID` column and an optional `Reason`
