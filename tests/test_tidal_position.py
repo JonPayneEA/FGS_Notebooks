@@ -81,3 +81,15 @@ def test_several_tidal_measures_with_no_value_type_stay_ambiguous_for_the_readin
     out = apply_position_matches(rows, position_candidates(rows, STATIONS), reg)
     assert list(out["match_status"]) == ["ambiguous", "ambiguous"] and set(out["measure_uri"]) == {"m1", "m2"}
     assert apply_position_matches(rows, position_candidates(rows, STATIONS), reg.iloc[0:0]).equals(rows)   # no tidal measure: untouched
+
+
+def test_only_instantaneous_measures_are_taken_when_the_register_gives_the_type():
+    rows = mapping_rows([("a", "5338N011W", "Immingham")])
+    only_mean = register([("m2", "E71139", "Immingham", "level", "Tidal Level", "mean", "900", "mAOD"),
+                          ("m3", "E71124", "Immingham", "level", "Tidal Level", "max", "900", "mAOD")])
+    out = apply_position_matches(rows, position_candidates(rows, STATIONS), only_mean)
+    assert list(out["match_status"]) == ["no_station"]                      # no instantaneous tidal measure: not matched to a mean
+    mixed = register([("m1", "E71139", "Immingham", "level", "Tidal Level", "instantaneous", "900", "mAOD"),
+                      ("m2", "E71139", "Immingham", "level", "Tidal Level", "mean", "900", "mAOD")])
+    out = apply_position_matches(rows, position_candidates(rows, STATIONS), mixed)
+    assert list(out["measure_uri"]) == ["m1"] and list(out["match_status"]) == ["matched"]

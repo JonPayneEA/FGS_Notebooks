@@ -14,8 +14,10 @@
 # A name that agrees with a station AND a position within a few kilometres of it is strong evidence, and
 # position alone is weaker. Each candidate says which, and its distance, so the rule can be chosen on what it
 # shows. Nothing here guesses a measure: apply_position_matches() takes only the station's tidal level
-# measures, prefers instantaneous readings where the register says which they are, and leaves several
-# measures ambiguous for the readings to settle.
+# measures that are INSTANTANEOUS (the thresholds are for instantaneous levels, not means). Where the register
+# says which value type each measure is, a station with no instantaneous tidal measure is left unmatched. Where
+# it does not say at all (the value type is empty for every candidate), the tidal measures are all kept and,
+# if there are several, left ambiguous for the readings to settle.
 # =============================================================================
 
 import math
@@ -112,9 +114,11 @@ def apply_position_matches(rows: pd.DataFrame, candidates: pd.DataFrame, registe
     Give no_station rows a measure when a station agrees with their name AND position.
 
     The station's tidal level measures are taken (a level measure whose qualifier says Tidal; a station with
-    none is left alone). If the register says which are instantaneous, those are preferred. Exactly one
-    measure is a match, with a note saying how it was found; several are written as ambiguous, one line each,
-    for the readings to settle. Rows with no such station are untouched.
+    none is left alone), and of those only the instantaneous ones, wherever the register gives a value type.
+    A station whose tidal measures are all means (or any other type) is left unmatched. If the value type is
+    empty for every one, they are all kept. Exactly one measure is a match, with a note saying how it was
+    found; several are written as ambiguous, one line each, for the readings to settle. Rows with no such
+    station are untouched.
     """
     c = candidates[candidates["evidence"] == evidence] if len(candidates) else candidates
     if c.empty:
@@ -129,8 +133,8 @@ def apply_position_matches(rows: pd.DataFrame, candidates: pd.DataFrame, registe
     for rid, g in c.groupby("id"):
         refs = {clean(x) for x in g["candidate_station_reference"]}
         m = reg[reg["_ref"].isin(refs) & (reg["_family"] == "level") & reg["_tidal"]]
-        if has_vt and (m["value_type"].fillna("").str.lower() == prefer_value_type).any():
-            m = m[m["value_type"].fillna("").str.lower() == prefer_value_type]
+        if has_vt and m["value_type"].notna().any():
+            m = m[m["value_type"].fillna("").str.lower() == prefer_value_type]     # the type is known: take only that one
         if m.empty:
             continue
         handled.add(rid)
