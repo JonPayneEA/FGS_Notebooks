@@ -295,3 +295,16 @@ def test_an_fffs_id_that_is_true_and_false_loses_only_the_row_the_false_line_des
     assert out.loc["1", "match_status"] == "matched"          # F1 is TRUE for 2001: the real-time row survives
     assert out.loc["2", "match_status"] == "out_of_scope"     # its NRW line is FALSE
     assert out.loc["3", "match_status"] == "out_of_scope"     # F2 is FALSE only: unchanged
+
+def test_level_measures_that_differ_only_by_datum_are_each_matched_with_the_unit_kept():
+    reg = pd.DataFrame({"measure_uri": ["m/a-maod", "m/a-masd"], "station_reference": ["4098"] * 2, "station_label": ["Keadby"] * 2,
+                        "parameter": ["level"] * 2, "qualifier": ["Tidal Level"] * 2, "period": ["300"] * 2, "unit_name": ["mAOD", "mASD"]})
+    rows, report = match_mapping(mapping([("a", "KEA1", "Keadby", "H.obs", "4098", "Water Level", None, "4098")]), reg)
+    assert list(rows["match_status"]) == ["matched", "matched"]
+    assert set(rows["measure_uri"]) == {"m/a-maod", "m/a-masd"} and set(rows["unit_name"]) == {"mAOD", "mASD"}
+    assert "differ only by datum" in rows.iloc[0]["match_note"]
+    # A different period or qualifier is a real ambiguity, not a datum variant.
+    reg2 = reg.copy()
+    reg2.loc[1, "period"] = "900"
+    rows, _ = match_mapping(mapping([("a", "KEA1", "Keadby", "H.obs", "4098", "Water Level", None, "4098")]), reg2)
+    assert set(rows["match_status"]) == {"ambiguous"}
