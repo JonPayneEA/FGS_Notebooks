@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.mapping_diagnostics import (  # noqa: E402
     candidate_measures, candidate_summary, classify_ambiguity, matched_name_check, name_similarity, stage_pairs,
-    id_shape, keep_true_status, profile_unplaced, station_candidates, tidal_summary, tidy_id, unmapped_measures, welsh_hint,
+    id_shape, keep_true_status, pair_by_external_id, profile_unplaced, station_candidates, tidal_summary, tidy_id, unmapped_measures, welsh_hint,
 )
 
 STATIONS = pd.DataFrame({
@@ -192,3 +192,26 @@ def test_kept_rows_are_listed_with_whether_they_paired_to_a_real_time_measure():
         assert False
     except ValueError as e:
         assert "FFFS_ID and Keep" in str(e)
+
+
+def test_a_kept_row_the_file_cannot_place_is_tried_on_its_external_id():
+    reg = pd.DataFrame({"measure_uri": ["m/2230TH-stage", "m/2453TH-stage"], "station_reference": ["2230TH", "2453TH"],
+                        "station_label": ["Knighton Main", "Other"], "parameter": ["level", "level"], "qualifier": ["Stage", "Stage"],
+                        "period": ["900", "900"], "unit_name": ["mASD", "mASD"]})
+    scope = pd.DataFrame({"FFFS_ID": ["2230_w1TH", "2453TH", "ZZ1", "OK1"], "Parameter": ["H.obs"] * 4,
+                          "ExternalID": ["2230TH", "2453TH", "E9999", "T1"], "ExternalParameter": ["Water Level"] * 4,
+                          "ImportSource": ["Telemetry"] * 4, "Keep": ["TRUE"] * 4})
+    mapping = pd.DataFrame([
+        {"id": "1", "fffs_id": "2230_w1TH", "telemetry_id": "2230_w1TH", "match_status": "no_station", "measure_uri": None,
+         "station_reference": None, "station_label": None, "n_readings": None, "match_note": "x"},
+        {"id": "2", "fffs_id": "OK1", "telemetry_id": "T1", "match_status": "matched", "measure_uri": "m/t1",
+         "station_reference": "T1", "station_label": "T", "n_readings": 50, "match_note": ""}])
+    kept = keep_true_status(scope, mapping)          # 2453TH and ZZ1 are not in the mapping file at all
+    activity = pd.DataFrame({"measure_uri": ["m/2453TH-stage"], "n_readings": [10], "first_reading": ["2026-01-01"],
+                             "last_reading": ["2026-10-22"]})
+    out = pair_by_external_id(kept, reg, activity, now=pd.Timestamp("2026-10-23")).set_index("FFFS_ID")
+    assert out.loc["2230_w1TH", "paired"] and out.loc["2230_w1TH", "paired_via"] == "ExternalID"
+    assert out.loc["2230_w1TH", "external_measure_uri"] == "m/2230TH-stage" and out.loc["2230_w1TH", "data_state"] == "matched, no readings"
+    assert out.loc["2453TH", "paired_via"] == "ExternalID" and out.loc["2453TH", "data_state"] == "delivers data"
+    assert not out.loc["ZZ1", "paired"] and out.loc["ZZ1", "external_status"] == "no_station" and out.loc["ZZ1", "data_state"] == "not paired"
+    assert out.loc["OK1", "paired_via"] == "mapping file" and out.loc["OK1", "data_state"] == "delivers data"

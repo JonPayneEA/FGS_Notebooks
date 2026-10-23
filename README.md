@@ -1295,7 +1295,9 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     lists the register measures nothing points at. Section 8 reads `Import_Timeseries.csv`, keeps the rows
     marked `Keep = TRUE`, and shows for each whether it paired to a real-time measure, or why not (the status
     and note, or that neither its `FFFS_ID` nor its `ExternalID` is a row of the mapping file), with counts by
-    status and by `ImportSource`. The `export_path` widget writes that list to a CSV. The logic is in
+    status and by `ImportSource`. A kept row the mapping file cannot place (`no_station`, or not in the file) is
+    retried on the list's own `ExternalID` as the station reference, and each pair is marked `delivers data`
+    or `matched, no readings` (a suspended station is in the register but delivers nothing). The `export_path` widget writes that list to a CSV. The logic is in
     `utils/mapping_diagnostics.py`.
 
   ```sql
