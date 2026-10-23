@@ -344,3 +344,59 @@ def matched_name_check(rows: pd.DataFrame, below: float = 0.4) -> pd.DataFrame:
     m["name_similarity"] = [name_similarity(a, b) for a, b in zip(m["fffs_location_name"], m["station_label"])]
     cols = ["telemetry_id", "telemetry_parameter", "fffs_location_name", "station_label", "measure_uri", "name_similarity"]
     return m[m["name_similarity"] < below][cols].sort_values("name_similarity")
+
+
+_TRUE_WORDS = {"true", "t", "yes", "y", "1", "1.0"}
+_STATUS_ORDER = ["matched", "ambiguous", "conflict", "no_parameter", "unknown_parameter", "no_station", "inactive", "out_of_scope", "no_telemetry_id"]
+
+
+def keep_true_status(scope: pd.DataFrame, rows: pd.DataFrame) -> pd.DataFrame:
+    """
+    The rows of the import list that are marked Keep = TRUE, each with whether it paired to a real-time measure.
+
+    Args:
+        scope: the import list (Import_Timeseries.csv): FFFS_ID, Keep, and optionally Parameter, ExternalID,
+               ExternalParameter, ImportSource. Column names are matched without regard to case, spaces or
+               underscores.
+        rows:  ea_rt_telemetry_mapping (one line per mapping row, or per candidate when ambiguous).
+
+    Returns:
+        One line per kept row: the list's own columns, then in_mapping (the FFFS_ID, or failing that the
+        ExternalID read as a TelemetryID, is a row of the mapping file), paired (it matched a measure),
+        match_status, measure_uri, station_reference, station_label, n_readings and the mapping note.
+        A row on the list but absent from the mapping file says so; one in the file but unmatched shows why.
+    """
+    import re as _re
+    norm = {_re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in scope.columns}
+    fcol, kcol = norm.get("fffsid"), norm.get("keep")
+    if not fcol or not kcol:
+        raise ValueError(f"The import list needs FFFS_ID and Keep columns. Columns present: {list(scope.columns)}")
+    ecol = norm.get("externalid")
+    keep = scope[scope[kcol].map(lambda v: (clean(v) or "").lower() in _TRUE_WORDS)]
+    by_fffs, by_tel = {}, {}
+    for rec in rows.to_dict("records"):
+        if clean(rec.get("fffs_id")):
+            by_fffs.setdefault(clean(rec["fffs_id"]), []).append(rec)
+        if clean(rec.get("telemetry_id")):
+            by_tel.setdefault(clean(rec["telemetry_id"]), []).append(rec)
+    out = []
+    for r in keep.to_dict("records"):
+        fid, eid = clean(r.get(fcol)), (clean(r.get(ecol)) if ecol else None)
+        lines = by_fffs.get(fid) or (by_tel.get(eid) if eid else None) or []
+        line = {"FFFS_ID": fid}
+        for key in ("parameter", "externalid", "externalparameter", "importsource"):
+            if norm.get(key):
+                line[norm[key]] = clean(r.get(norm[key]))
+        if lines:
+            lines = sorted(lines, key=lambda x: _STATUS_ORDER.index(x["match_status"]) if x.get("match_status") in _STATUS_ORDER else 99)
+            best = lines[0]
+            line.update({"in_mapping": True, "paired": best.get("match_status") == "matched",
+                         "match_status": best.get("match_status"), "measure_uri": best.get("measure_uri"),
+                         "station_reference": best.get("station_reference"), "station_label": best.get("station_label"),
+                         "n_readings": best.get("n_readings"), "match_note": best.get("match_note")})
+        else:
+            line.update({"in_mapping": False, "paired": False, "match_status": "not in the mapping file", "measure_uri": None,
+                         "station_reference": None, "station_label": None, "n_readings": None,
+                         "match_note": "neither the FFFS_ID nor the ExternalID is a row of the mapping file"})
+        out.append(line)
+    return pd.DataFrame(out)

@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.mapping_diagnostics import (  # noqa: E402
     candidate_measures, candidate_summary, classify_ambiguity, matched_name_check, name_similarity, stage_pairs,
-    id_shape, profile_unplaced, station_candidates, tidal_summary, tidy_id, unmapped_measures, welsh_hint,
+    id_shape, keep_true_status, profile_unplaced, station_candidates, tidal_summary, tidy_id, unmapped_measures, welsh_hint,
 )
 
 STATIONS = pd.DataFrame({
@@ -163,3 +163,32 @@ def test_the_profile_of_unplaced_rows_shows_what_they_share():
     # Pont y Rhyd, Aberdeen Road and Llanwrtyd: Aberdeen is a false hint, which is why it is only a hint.
     assert h["rows"] == 4 and h["has a WISKI id"] == 2 and h["name has a Welsh place-name element (hint only)"] == 3
     assert welsh_hint("Pont y Rhyd") and welsh_hint("Llanwrtyd") and welsh_hint("Ty Mawr") and not welsh_hint("Leith") and not welsh_hint("")
+
+
+def test_kept_rows_are_listed_with_whether_they_paired_to_a_real_time_measure():
+    mapping = pd.DataFrame([
+        {"id": "1", "fffs_id": "F1", "telemetry_id": "T1", "match_status": "matched", "measure_uri": "m/1", "station_reference": "S1",
+         "station_label": "One", "n_readings": 900, "match_note": ""},
+        {"id": "2", "fffs_id": "F2", "telemetry_id": "T2", "match_status": "no_station", "measure_uri": None, "station_reference": None,
+         "station_label": None, "n_readings": None, "match_note": "no measure in the register has this station reference"},
+        {"id": "3", "fffs_id": "F3", "telemetry_id": "T3", "match_status": "ambiguous", "measure_uri": "m/3a", "station_reference": "S3",
+         "station_label": "Three", "n_readings": 5, "match_note": "2 level measures fit"},
+        {"id": "3", "fffs_id": "F3", "telemetry_id": "T3", "match_status": "ambiguous", "measure_uri": "m/3b", "station_reference": "S3",
+         "station_label": "Three", "n_readings": 6, "match_note": "2 level measures fit"},
+        {"id": "4", "fffs_id": "F4", "telemetry_id": "5547N20W", "match_status": "matched", "measure_uri": "m/4", "station_reference": "S4",
+         "station_label": "Four", "n_readings": 7, "match_note": ""}])
+    scope = pd.DataFrame({"FFFS_ID": ["F1", "F2", "F3", "F9", "FX", "F5"], "Parameter": ["H.obs"] * 6,
+                          "ExternalID": ["T1", "T2", "T3", "T9", "5547N20W", "T5"], "ExternalParameter": ["Water Level"] * 6,
+                          "ImportSource": ["Telemetry"] * 6, "Keep": ["TRUE", "true", "TRUE", "TRUE", "TRUE", "FALSE"]})
+    out = keep_true_status(scope, mapping).set_index("FFFS_ID")
+    assert list(out.index) == ["F1", "F2", "F3", "F9", "FX"]                      # F5 is Keep = FALSE: not listed
+    assert out.loc["F1", "paired"] and out.loc["F1", "measure_uri"] == "m/1" and out.loc["F1", "n_readings"] == 900
+    assert not out.loc["F2", "paired"] and out.loc["F2", "in_mapping"] and out.loc["F2", "match_status"] == "no_station"
+    assert not out.loc["F3", "paired"] and out.loc["F3", "match_status"] == "ambiguous"
+    assert not out.loc["F9", "in_mapping"] and out.loc["F9", "match_status"] == "not in the mapping file"
+    assert out.loc["FX", "paired"] and out.loc["FX", "measure_uri"] == "m/4"        # found through the ExternalID as a TelemetryID
+    try:
+        keep_true_status(pd.DataFrame({"FFFS_ID": ["a"]}), mapping)
+        assert False
+    except ValueError as e:
+        assert "FFFS_ID and Keep" in str(e)
