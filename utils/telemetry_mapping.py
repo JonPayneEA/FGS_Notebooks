@@ -378,6 +378,14 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
             add(row, "no_station", "no measure in the register has this station reference")
             continue
         cands = station[station["family"] == family]
+        if cands.empty and family in ("level", "groundwater"):
+            # A borehole is coded as groundwater in one place and as a level in another (Stage, say), so a row of one
+            # family with no measure of its own falls back on the station's measures of the other.
+            other = "groundwater" if family == "level" else "level"
+            cands = station[station["family"] == other]
+            if not cands.empty:
+                id_note = "; ".join(x for x in (id_note, f"the station has no {family} measure, so its {other} measure is used") if x)
+                family = other
         if cands.empty:
             have = ", ".join(sorted({f or "unknown" for f in station["family"]}))
             add(row, "no_parameter", f"the station has no {family} measure (it has: {have})")
@@ -458,6 +466,51 @@ def fallback_external_id(rows: pd.DataFrame, mapping: pd.DataFrame, scope: pd.Da
     keep_rows = rows[~rows["id"].isin(retried["id"])]
     out = pd.concat([keep_rows, retried[[c for c in rows.columns if c in retried.columns]]], ignore_index=True)
     return out, int(retried[retried["match_status"] == "matched"]["id"].nunique())
+
+
+def add_import_only_rows(rows: pd.DataFrame, mapping: pd.DataFrame, scope: pd.DataFrame, register: pd.DataFrame):
+    """
+    Add the import list's kept rows that the mapping file does not have, where their ExternalID finds a measure.
+
+    A row of the import list marked Keep = TRUE whose FFFS_ID and ExternalID are both absent from the mapping file
+    (a rain gauge the file never listed, say) has no line in the mapping table, so the real-time data for it never
+    reaches the link to the thresholds. Each such row is matched with its ExternalID as the station reference and its
+    Parameter and ExternalParameter naming the family, with the same rules as any mapping row (leading zeros,
+    datum, instantaneous, borehole family). Only rows that match or are ambiguous are added, as new lines whose note
+    says they come from the import list alone; ones that find nothing are not added.
+
+    Returns (rows, n): the rows with the new lines appended, and the number of import rows added (matched or ambiguous).
+    """
+    if scope is None or scope.empty:
+        return rows, 0
+    norm = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in scope.columns}
+    fcol, ecol, kcol = norm.get("fffsid"), norm.get("externalid"), norm.get("keep")
+    pcol, xcol = norm.get("parameter"), norm.get("externalparameter")
+    qcol = next((c for k, c in norm.items() if "qualifier" in k), None)
+    if not fcol or not ecol or not kcol:
+        return rows, 0
+    have_f = {clean(v) for v in mapping["fffs_id"]} - {None}
+    have_t = {clean(v) for v in mapping["telemetry_id"]} - {None}
+    sc = scope[scope[kcol].map(lambda v: (clean(v) or "").lower() in _TRUE_WORDS)]
+    sc = sc[sc[fcol].map(lambda v: bool(clean(v)) and clean(v) not in have_f) & sc[ecol].map(lambda v: bool(clean(v)) and clean(v) not in have_t)]
+    sc = sc.drop_duplicates(subset=[fcol, ecol] + ([pcol] if pcol else []))
+    if sc.empty:
+        return rows, 0
+    raw = pd.DataFrame({"ID": [f"import_{i}" for i in range(len(sc))], "FFFS_ID": sc[fcol].values, "FFFSLocName": None,
+                        "ParameterID": sc[pcol].values if pcol else None, "TelemetryID": sc[ecol].values,
+                        "TelemetryParameter": sc[xcol].values if xcol else None,
+                        "ParameterQualifier": sc[qcol].values if qcol else None, "WISKI_ID": None})
+    new, _ = match_mapping(prepare_mapping(raw)[0], register)
+    new = new[new["match_status"].isin(["matched", "ambiguous"])].copy()
+    if new.empty:
+        return rows, 0
+    new["match_note"] = ["; ".join(x for x in ("from the import list only (the mapping file does not have this row)", n or "") if x)
+                         for n in new["match_note"]]
+    for c in rows.columns:
+        if c not in new.columns:
+            new[c] = None
+    out = pd.concat([rows, new[list(rows.columns)]], ignore_index=True)
+    return out, int(new["id"].nunique())
 
 
 def settle_by_readings(rows: pd.DataFrame, activity: pd.DataFrame, now, recent_days: int = 30):

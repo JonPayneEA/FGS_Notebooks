@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.mapping_diagnostics import (  # noqa: E402
     candidate_measures, candidate_summary, classify_ambiguity, matched_name_check, name_similarity, stage_pairs,
-    id_shape, keep_true_status, numeric_id_variants, pair_by_external_id, profile_unpaired_kept, profile_unplaced, station_candidates, tidal_summary, tidy_id, unmapped_measures, welsh_hint,
+    id_shape, keep_true_status, listed_station_check, numeric_id_variants, pair_by_external_id, profile_unpaired_kept, profile_unplaced, station_candidates, tidal_summary, tidy_id, unmapped_measures, welsh_hint,
 )
 
 STATIONS = pd.DataFrame({
@@ -247,3 +247,17 @@ def test_numeric_ids_are_checked_against_the_register_in_each_form():
     assert out.loc["56000", "starts_with"] == "56000A"
     assert out.loc["99999", "verdict"] == "nothing like it in the register"
     assert "E1" not in out.index                                   # not digits only
+
+
+def test_unpaired_ids_are_checked_against_the_register_and_the_station_list():
+    reg = pd.DataFrame({"station_reference": ["A1"]})
+    stations = pd.DataFrame({"stationReference": ["S9", "A1", "S77"], "notation": ["S9", "A1", "S77"], "RLOIid": ["1234", None, "5678"],
+                             "wiskiID": [None, None, "W-1"], "label": ["Nine", "A one", "Seventy"]})
+    kept = pd.DataFrame({"ExternalID": ["A1", "S9", "1234", "W-1", "ZZ9", "074"], "paired": [False] * 6, "match_status": ["no_station"] * 6})
+    out = listed_station_check(kept, reg, stations).set_index("external_id")
+    assert "something else stopped" in out.loc["A1", "verdict"]
+    assert out.loc["S9", "verdict"] == "station listed, no measures in the register" and out.loc["S9", "station_label"] == "Nine"
+    assert out.loc["1234", "listed_by"] == "RLOIid" and out.loc["1234", "station_reference"] == "S9"
+    assert out.loc["W-1", "listed_by"] == "wiskiID" and out.loc["W-1", "station_reference"] == "S77"
+    assert out.loc["ZZ9", "verdict"] == "not in the station list either"
+    assert out.loc["074", "verdict"] == "not in the station list either"
