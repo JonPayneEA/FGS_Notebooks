@@ -510,3 +510,53 @@ def profile_unpaired_kept(kept: pd.DataFrame) -> dict:
     unknown = (unk.groupby([unk[c].fillna("(none)") for c in keys]).size().rename("rows").reset_index().sort_values("rows", ascending=False)
                if keys and len(unk) else pd.DataFrame(columns=keys + ["rows"]))
     return {"shapes": shapes, "prefixes": prefixes, "sources": sources, "unknown_parameter": unknown}
+
+
+def numeric_id_variants(kept: pd.DataFrame, register: pd.DataFrame, max_examples: int = 3) -> pd.DataFrame:
+    """
+    For the unpaired kept rows whose ExternalID is digits only, what the register holds that looks like it.
+
+    Tests each ID against the register's station references: as written; with leading zeros to six digits (the
+    rule notebook 16 applies); with zeros to seven or eight digits; and any reference that ENDS with the digits
+    (a letter or other prefix in front) or STARTS with them (a suffix behind). It says which test found something
+    and shows examples, so a rule that does not fire can be told from an ID the feed does not carry.
+
+    Args:
+        kept:     pair_by_external_id() output (needs paired, match_status, ExternalID).
+        register: the measure register (station_reference).
+
+    Returns:
+        One line per ID: external_id, status, then found_as_written, found_zero_padded_6, found_zero_padded_7_8,
+        ends_with (examples), starts_with (examples), and verdict.
+    """
+    import re as _re
+    norm = {_re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in kept.columns}
+    ecol = norm.get("externalid")
+    cols = ["external_id", "match_status", "found_as_written", "found_zero_padded_6", "found_zero_padded_7_8", "ends_with",
+            "starts_with", "verdict"]
+    if not ecol:
+        return pd.DataFrame(columns=cols)
+    refs = sorted({clean(v) for v in register["station_reference"].dropna()} - {None})
+    refset = set(refs)
+    un = kept[~kept["paired"]]
+    out = []
+    for eid, status in zip(un[ecol], un["match_status"]):
+        e = clean(eid)
+        if not e or not e.isdigit():
+            continue
+        padded6 = e.zfill(6) in refset and len(e) < 6
+        padded78 = [e.zfill(n) for n in (7, 8) if e.zfill(n) in refset and len(e) < n]
+        ends = [r for r in refs if r.endswith(e) and r != e][:max_examples]
+        starts = [r for r in refs if r.startswith(e) and r != e][:max_examples]
+        if e in refset:
+            verdict = "in the register as written (something else stopped the match)"
+        elif padded6:
+            verdict = "leading-zero rule should match (check notebook 16 was re-run)"
+        elif padded78 or ends or starts:
+            verdict = "a similar reference exists: a different rule is needed"
+        else:
+            verdict = "nothing like it in the register"
+        out.append({"external_id": e, "match_status": status, "found_as_written": e in refset, "found_zero_padded_6": padded6,
+                    "found_zero_padded_7_8": ", ".join(padded78), "ends_with": ", ".join(ends), "starts_with": ", ".join(starts),
+                    "verdict": verdict})
+    return pd.DataFrame(out, columns=cols)
