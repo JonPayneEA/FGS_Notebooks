@@ -185,7 +185,8 @@ def _prefer_stage_in_datum(cands: pd.DataFrame):
     Narrow several level measures at one station when the file does not name a qualifier. Some stations
     export a Logged level beside the Stage level, and the Stage in two forms (with a datum such as mASD, and
     with none). Logged is dropped where a non-Logged measure exists, then the no-datum measure is dropped
-    where one with a datum exists. Never empties the set. Returns (candidates, note).
+    where one with a datum exists, then any non-instantaneous measure (a mean, say) where an instantaneous one
+    exists and every value type is known. Never empties the set. Returns (candidates, note).
     """
     notes = []
     logged = cands["qualifier_key"].str.contains("logged", na=False)
@@ -197,6 +198,12 @@ def _prefer_stage_in_datum(cands: pd.DataFrame):
     if nodatum.any() and not nodatum.all():
         cands = cands[~nodatum]
         notes.append("level with no datum set aside")
+    if "value_type" in cands:
+        vtype = cands["value_type"].map(lambda v: (clean(v) or "").strip().lower())
+        instant = vtype == "instantaneous"
+        if instant.any() and not instant.all() and vtype.map(bool).all():
+            cands = cands[instant]
+            notes.append("non-instantaneous (mean, for example) level set aside")
     return cands, "; ".join(notes)
 
 
