@@ -1295,7 +1295,11 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     that one is. The row's note says "settled by readings". Every matched measure also gets
     `n_readings`, `first_reading` and `last_reading`, so a mapped gauge that delivers nothing is
     visible. The `settle_by_readings` widget switches it off. Two candidates that both deliver stay
-    ambiguous: they are not guessed.
+    ambiguous unless they are exact duplicates (below): they are not guessed.
+    Where several candidates deliver and are exact duplicates of one another (identical qualifier, period, unit and value
+    type: the feed lists one gauge twice, as `E73639-anglian-...` and `E73639-...`), the one with the most readings is
+    chosen, then the latest reading, then the URI, and the note names the others. Candidates that differ in any of those stay
+    ambiguous.
   - **`ea_rt_measures_mapped`** (a view) is the register with `gauge_name` (the file's
     `FFFSLocName`), `fffs_id`, `n_fffs_ids`, `wiski_id`, `wiski_parameter` and every other column
     of the file (`parameter_id`, `wiski_xml_*`, `src_<column>`) where a measure matched. A measure
