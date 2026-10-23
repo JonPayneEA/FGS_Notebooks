@@ -1240,6 +1240,9 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     file's `TelemetryID`, and its note says the `ExternalID` found it. A suspended or silent station still
     matches, and `n_readings` of 0 shows that it delivers nothing. Rows marked Keep = FALSE are not retried. The
     `external_id_fallback` widget switches it off.
+  - **An FFFS_ID that is TRUE and FALSE.** An `FFFS_ID` can be on the import list twice: TRUE for its real-time
+    source and FALSE for another (NRW, say). A FALSE line then removes only the mapping row whose `TelemetryID` is that
+    line's `ExternalID`; the TRUE row is kept and matched. An `FFFS_ID` that is FALSE only is removed as before.
   - **Logged levels and datums.** Some stations export a Logged level beside the Stage level, and the Stage in
     two forms (with a datum such as mASD, and with none). Where the file names no qualifier, a level match
     drops the Logged measure when a Stage exists, then drops the no-datum measure when a datum one exists. The
