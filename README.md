@@ -1249,6 +1249,12 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     added to `ea_rt_telemetry_mapping` as a new line (id `import_<n>`) when it matches or is ambiguous, so its data
     reaches the link to the thresholds. The note says it comes from the import list alone. It runs with the
     `external_id_fallback` widget.
+  - **One tide gauge, two datums.** The same gauge can be listed as two stations, one in a local datum (m) and one in
+    mAOD (the register links them through a `localDatumMeasure`). When the tide gauges matched by position are
+    instantaneous measures that share the qualifier and period and differ only in `unit_name`, each is `matched`, and
+    `unit_name` tells them apart. `register_value_type` is now written to the mapping table beside `unit_name`, and
+    the ambiguity table in the explore notebook (section 4) says whether the candidates differ by unit or by value
+    type as well as by qualifier and period.
   - **Matching IDs between the files.** The import list and the mapping file are joined on a key that ignores case
     and leading zeros (`83280` and `083280`, `E05720` and `E5720`, `155TH` and `0155TH`), because Excel drops
     zeros in some files and not in others. It applies to the Keep list, the ExternalID fallback, the import-list-only

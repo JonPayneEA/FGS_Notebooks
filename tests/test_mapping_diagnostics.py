@@ -270,3 +270,15 @@ def test_a_kept_row_is_found_in_the_mapping_when_only_leading_zeros_differ():
                           "ImportSource": ["Telemetry"], "Keep": ["TRUE"]})
     out = keep_true_status(scope, mapping)
     assert bool(out.iloc[0]["in_mapping"]) and bool(out.iloc[0]["paired"]) and out.iloc[0]["measure_uri"] == "m/1"
+
+
+def test_ambiguity_says_when_candidates_differ_by_unit_or_value_type():
+    base = {"match_status": "ambiguous", "telemetry_id": "075497", "telemetry_parameter": "Rainfall", "parameter_qualifier": None,
+            "register_qualifier": "Tipping Bucket Raingauge", "period": "900"}
+    rows = pd.DataFrame([{**base, "id": "r", "unit_name": "mm", "register_value_type": "instantaneous"},
+                         {**base, "id": "r", "unit_name": "mm", "register_value_type": "total"},
+                         {**base, "id": "t", "unit_name": "m", "register_value_type": "mean"},
+                         {**base, "id": "t", "unit_name": "mAOD", "register_value_type": "mean"}])
+    a = classify_ambiguity(rows).set_index("id")
+    assert a.loc["r", "why"] == "same qualifier and period; differ by value type" and a.loc["r", "value_types"] == "instantaneous | total"
+    assert a.loc["t", "why"] == "same qualifier and period; differ by unit (datum)" and a.loc["t", "units"] == "m | maod"

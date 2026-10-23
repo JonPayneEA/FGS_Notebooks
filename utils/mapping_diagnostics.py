@@ -183,12 +183,17 @@ def classify_ambiguity(rows: pd.DataFrame) -> pd.DataFrame:
     for rid, g in amb.groupby("id"):
         quals = {(q or "").lower() for q in g["register_qualifier"]}
         periods = {p for p in g["period"] if p}
+        units = {(u or "").lower() for u in g["unit_name"]} if "unit_name" in g else set()
+        vtypes = {(v or "").lower() for v in g["register_value_type"]} if "register_value_type" in g else set()
         if len(quals) == 1 and len(periods) > 1:
             why = "same qualifier, different period"
         elif len(quals) > 1 and len(periods) <= 1:
             why = "different qualifiers, same period"
         elif len(quals) > 1 and len(periods) > 1:
             why = "different qualifiers and periods"
+        elif len(units) > 1 or len(vtypes) > 1:
+            why = "same qualifier and period; differ by " + " and ".join(
+                p for p, n in (("unit (datum)", len(units)), ("value type", len(vtypes))) if n > 1)
         else:
             why = "identical qualifier and period (duplicate measures)"
         nums = pd.to_numeric(pd.Series(list(g["period"])), errors="coerce")
@@ -196,9 +201,10 @@ def classify_ambiguity(rows: pd.DataFrame) -> pd.DataFrame:
         out.append({"id": rid, "telemetry_id": g["telemetry_id"].iloc[0], "telemetry_parameter": g["telemetry_parameter"].iloc[0],
                     "parameter_qualifier": g["parameter_qualifier"].iloc[0], "candidates": len(g), "why": why,
                     "qualifiers": " | ".join(sorted(q for q in {x or "" for x in g["register_qualifier"]})),
-                    "periods": " | ".join(sorted(periods)), "settled_by_shortest_period": len(shortest) == 1})
+                    "periods": " | ".join(sorted(periods)), "settled_by_shortest_period": len(shortest) == 1,
+                    "units": " | ".join(sorted(units)), "value_types": " | ".join(sorted(vtypes))})
     return pd.DataFrame(out, columns=["id", "telemetry_id", "telemetry_parameter", "parameter_qualifier", "candidates", "why",
-                                      "qualifiers", "periods", "settled_by_shortest_period"])
+                                      "qualifiers", "periods", "settled_by_shortest_period", "units", "value_types"])
 
 
 _STAGE_PAIR = {"stage", "downstream stage"}

@@ -234,7 +234,8 @@ def _differ_only_by_datum(cands: pd.DataFrame) -> bool:
     return same_kind and all(units) and len(set(units)) == len(units)
 
 
-_MEASURE_COLUMNS = ("measure_uri", "station_reference", "station_label", "register_parameter", "register_qualifier", "period", "unit_name")
+_MEASURE_COLUMNS = ("measure_uri", "station_reference", "station_label", "register_parameter", "register_qualifier", "period", "unit_name",
+                    "register_value_type")
 
 
 def _set_aside(rows: pd.DataFrame, mask: pd.Series, status: str, note, keep_note_for_matched: str, override_matched: bool = False):
@@ -360,7 +361,8 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
         rec["match_status"], rec["match_note"] = status, note
         for src, dst in (("measure_uri", "measure_uri"), ("station_reference", "station_reference"),
                          ("station_label", "station_label"), ("parameter", "register_parameter"),
-                         ("qualifier", "register_qualifier"), ("period", "period"), ("unit_name", "unit_name")):
+                         ("qualifier", "register_qualifier"), ("period", "period"), ("unit_name", "unit_name"),
+                         ("value_type", "register_value_type")):
             rec[dst] = None if cand is None else _none(cand.get(src))
         out.append(rec)
         examples.setdefault(status, [])
