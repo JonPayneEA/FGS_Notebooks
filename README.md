@@ -1234,6 +1234,11 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     `no_station`, `no_parameter`, `no_telemetry_id`, `inactive`, `out_of_scope`), a note saying why, and the measure it
     matched. A row whose location name says INACTIVE and that matched nothing is set aside as
     `inactive`; one that matched a live measure stays matched, with a note. Use only `matched` rows as the link. `fffs_id` is the key to the thresholds.
+  - **Logged levels and datums.** Some stations export a Logged level beside the Stage level, and the Stage in
+    two forms (with a datum such as mASD, and with none). Where the file names no qualifier, a level match
+    drops the Logged measure when a Stage exists, then drops the no-datum measure when a datum one exists. The
+    note says what was set aside. A file that names Logged still gets the Logged measure. What remains
+    ambiguous goes on to settling by readings.
   - **Settling by readings.** A station can list two measures of the same kind where only one ever
     delivers data (a retired or duplicate entry). The notebook counts each ambiguous candidate's
     readings in `ea_rt_readings_all` (one scan, for the measures the mapping points at): if exactly
