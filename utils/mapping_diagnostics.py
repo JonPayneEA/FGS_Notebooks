@@ -393,11 +393,12 @@ def keep_true_status(scope: pd.DataFrame, rows: pd.DataFrame) -> pd.DataFrame:
             line.update({"in_mapping": True, "paired": best.get("match_status") == "matched",
                          "match_status": best.get("match_status"), "measure_uri": best.get("measure_uri"),
                          "station_reference": best.get("station_reference"), "station_label": best.get("station_label"),
-                         "n_readings": best.get("n_readings"), "match_note": best.get("match_note")})
+                         "n_readings": best.get("n_readings"), "match_note": best.get("match_note"),
+                         "location_name": clean(best.get("fffs_location_name"))})
         else:
             line.update({"in_mapping": False, "paired": False, "match_status": "not in the mapping file", "measure_uri": None,
                          "station_reference": None, "station_label": None, "n_readings": None,
-                         "match_note": "neither the FFFS_ID nor the ExternalID is a row of the mapping file"})
+                         "match_note": "neither the FFFS_ID nor the ExternalID is a row of the mapping file", "location_name": None})
         out.append(line)
     return pd.DataFrame(out)
 
@@ -470,3 +471,42 @@ def pair_by_external_id(kept: pd.DataFrame, register: pd.DataFrame, activity=Non
     out.loc[out["paired_via"].notna(), "data_state"] = "matched, no readings"
     out.loc[delivers, "data_state"] = "delivers data"
     return out
+
+
+def profile_unpaired_kept(kept: pd.DataFrame) -> dict:
+    """
+    What the kept rows that did not pair have in common, so a rule or a list can be made for them.
+
+    Args:
+        kept: pair_by_external_id() output (needs paired, match_status, ExternalID, Parameter,
+              ExternalParameter, ImportSource; location_name when the mapping file had one).
+
+    Returns:
+        A dict of small DataFrames:
+        shapes          the shape of the ExternalID of the rows with no station (digits 9, letters A), by how many,
+                        how many are in the mapping file at all, and how many have a Welsh place-name element
+                        in the mapping file's name (a hint only);
+        prefixes        the first two characters of the same ExternalIDs;
+        sources         the same rows by ImportSource;
+        unknown_parameter  the Parameter and ExternalParameter words of the rows whose parameter is not known.
+    """
+    import re as _re
+    norm = {_re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in kept.columns}
+    ecol, pcol, xcol, scol = norm.get("externalid"), norm.get("parameter"), norm.get("externalparameter"), norm.get("importsource")
+    un = kept[~kept["paired"]]
+    gone = un[un["match_status"].isin(["no_station", "no_telemetry_id", "not in the mapping file"])].copy()
+    gone["_id"] = gone[ecol].map(clean) if ecol else None
+    gone["_welsh"] = gone["location_name"].map(welsh_hint) if "location_name" in gone else False
+    gone["shape"] = gone["_id"].map(id_shape)
+    gone["first_two_characters"] = gone["_id"].map(lambda v: (v or "")[:2].upper())
+    gone["in_mapping_file"] = gone["in_mapping"]
+    agg = {"rows": ("shape", "size"), "in_mapping_file": ("in_mapping_file", "sum"), "welsh_name_hint": ("_welsh", "sum")}
+    shapes = gone.groupby("shape").agg(**agg).reset_index().sort_values("rows", ascending=False)
+    prefixes = gone.groupby("first_two_characters").agg(**agg).reset_index().sort_values("rows", ascending=False)
+    sources = (gone.groupby(gone[scol].fillna("(none)")).size().rename("rows").reset_index().rename(columns={scol: "ImportSource"})
+               if scol else pd.DataFrame(columns=["ImportSource", "rows"]))
+    unk = un[un["match_status"] == "unknown_parameter"]
+    keys = [c for c in (pcol, xcol) if c]
+    unknown = (unk.groupby([unk[c].fillna("(none)") for c in keys]).size().rename("rows").reset_index().sort_values("rows", ascending=False)
+               if keys and len(unk) else pd.DataFrame(columns=keys + ["rows"]))
+    return {"shapes": shapes, "prefixes": prefixes, "sources": sources, "unknown_parameter": unknown}
