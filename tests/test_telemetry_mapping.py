@@ -321,3 +321,15 @@ def test_a_numeric_id_that_lost_its_leading_zero_is_matched_with_it_restored_onl
     assert "leading zeros restored" in by.loc["1", "match_note"] and by.loc["1", "telemetry_id"] == "22006"
     assert by.loc["2", "measure_uri"] == "m/2001" and not by.loc["2", "match_note"]
     assert by.loc["3", "match_status"] == "no_station"
+
+
+def test_an_instantaneous_level_is_preferred_to_a_mean_when_the_file_names_no_qualifier():
+    reg = pd.DataFrame({"measure_uri": ["m/nh-inst", "m/nh-mean"], "station_reference": ["SE71739"] * 2, "station_label": ["Newhaven"] * 2,
+                        "parameter": ["level"] * 2, "qualifier": ["Tidal Level"] * 2, "period": ["900"] * 2,
+                        "unit_name": ["m", "mAOD"], "value_type": ["instantaneous", "mean"]})
+    rows, _ = match_mapping(mapping([("a", "NH1", "Newhaven", "H.obs", "SE71739", "Water Level", None, "1")]), reg)
+    assert list(rows["match_status"]) == ["matched"] and rows.iloc[0]["measure_uri"] == "m/nh-inst"
+    assert "non-instantaneous" in rows.iloc[0]["match_note"]
+    # Unknown value types are not guessed: both measures differ only by unit, so each is matched as a datum variant.
+    rows, _ = match_mapping(mapping([("a", "NH1", "Newhaven", "H.obs", "SE71739", "Water Level", None, "1")]), reg.drop(columns="value_type"))
+    assert list(rows["match_status"]) == ["matched", "matched"]
