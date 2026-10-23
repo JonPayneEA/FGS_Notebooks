@@ -284,6 +284,18 @@ def test_a_row_with_no_station_is_retried_on_the_import_lists_external_id():
     assert n0 == 0 and len(same) == 3
 
 
+def test_an_fffs_id_that_is_true_and_false_loses_only_the_row_the_false_line_describes():
+    reg = register([("m/2001-level", "2001", "level", "Stage", "900")])
+    m = mapping([("1", "F1", "Real", "H.obs", "2001", "Water Level", None, "11"),
+                 ("2", "F1", "Welsh", "H.obs", "NRW77", "Water Level", None, "12"),
+                 ("3", "F2", "Plain", "H.obs", "NRW88", "Water Level", None, "13")])
+    rows, _ = match_mapping(m, reg)
+    scope = pd.DataFrame({"FFFS_ID": ["F1", "F1", "F2"], "ExternalID": ["2001", "NRW77", "NRW88"], "Keep": ["TRUE", "FALSE", "FALSE"]})
+    out = flag_out_of_scope(rows, scope).drop_duplicates("id").set_index("id")
+    assert out.loc["1", "match_status"] == "matched"          # F1 is TRUE for 2001: the real-time row survives
+    assert out.loc["2", "match_status"] == "out_of_scope"     # its NRW line is FALSE
+    assert out.loc["3", "match_status"] == "out_of_scope"     # F2 is FALSE only: unchanged
+
 def test_level_measures_that_differ_only_by_datum_are_each_matched_with_the_unit_kept():
     reg = pd.DataFrame({"measure_uri": ["m/a-maod", "m/a-masd"], "station_reference": ["4098"] * 2, "station_label": ["Keadby"] * 2,
                         "parameter": ["level"] * 2, "qualifier": ["Tidal Level"] * 2, "period": ["300"] * 2, "unit_name": ["mAOD", "mASD"]})

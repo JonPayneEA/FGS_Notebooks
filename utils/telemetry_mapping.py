@@ -249,6 +249,7 @@ def flag_inactive(rows: pd.DataFrame) -> pd.DataFrame:
 
 
 _FALSE_WORDS = {"false", "f", "no", "n", "0", "0.0"}
+_TRUE_WORDS = {"true", "t", "yes", "y", "1", "1.0"}
 
 
 def flag_out_of_scope(rows: pd.DataFrame, scope: pd.DataFrame) -> pd.DataFrame:
@@ -271,7 +272,16 @@ def flag_out_of_scope(rows: pd.DataFrame, scope: pd.DataFrame) -> pd.DataFrame:
     kcol, scol = norm.get("keep"), norm.get("importsource")
     if not fcol and not tcol:
         raise ValueError(f"The out-of-scope list needs an FFFS_ID or TelemetryID column. Columns present: {list(scope.columns)}")
+    ecol = norm.get("externalid")
+    kept_ids, false_ext = set(), {}
     if kcol:
+        # An FFFS_ID can be on the list twice: TRUE for the real-time source and FALSE for another (NRW, say). Note both,
+        # so that a FALSE line removes only the mapping row it describes (the one whose TelemetryID is its ExternalID).
+        if fcol and ecol:
+            kept_ids = {clean(f) for f, k in zip(scope[fcol], scope[kcol]) if clean(f) and (clean(k) or "").lower() in _TRUE_WORDS}
+            for f, e, k in zip(scope[fcol], scope[ecol], scope[kcol]):
+                if clean(f) and clean(f) in kept_ids and (clean(k) or "").lower() in _FALSE_WORDS:
+                    false_ext.setdefault(clean(f), set()).add(clean(e))
         # Only the rows marked FALSE are on the list. A blank Keep is not a decision, so it stays.
         scope = scope[scope[kcol].map(lambda v: (clean(v) or "").lower() in _FALSE_WORDS)].copy()
         if scope.empty:
@@ -289,6 +299,11 @@ def flag_out_of_scope(rows: pd.DataFrame, scope: pd.DataFrame) -> pd.DataFrame:
                 if clean(k):
                     reasons[(key, clean(k))] = clean(why) or "listed as out of scope"
     listed = rows["fffs_id"].map(clean).isin(fff) | rows["telemetry_id"].map(clean).isin(tel)
+    if false_ext:
+        # An FFFS_ID that is both TRUE and FALSE: only the row whose TelemetryID is a FALSE line's ExternalID is set aside.
+        mixed = rows["fffs_id"].map(clean).isin(false_ext.keys())
+        own = [clean(t) in false_ext.get(clean(f), ()) for f, t in zip(rows["fffs_id"], rows["telemetry_id"])]
+        listed = listed & ~(mixed & ~pd.Series(own, index=rows.index))
     if not listed.any():
         return rows
 
