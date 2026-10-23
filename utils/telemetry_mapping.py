@@ -225,13 +225,21 @@ def _prefer_stage_in_datum(cands: pd.DataFrame):
     return cands, "; ".join(notes)
 
 
-def _differ_only_by_datum(cands: pd.DataFrame) -> bool:
-    """True when several measures share the qualifier and the period and differ only in unit_name (mAOD, mASD ...)."""
-    if len(cands) < 2:
-        return False
+def _variant_kind(cands: pd.DataFrame):
+    """
+    "datum" or "value type" when several measures share the qualifier and the period and differ only in unit_name
+    (mAOD, mASD ...) or only in value type (instantaneous, total ...), else None. Every measure must differ from the
+    rest by a value that is known, so a blank never makes two measures look different.
+    """
+    if len(cands) < 2 or cands["qualifier_key"].nunique() != 1 or cands["period"].map(lambda v: clean(v) or "").nunique() != 1:
+        return None
     units = [(clean(v) or "").lower() for v in cands["unit_name"]]
-    same_kind = cands["qualifier_key"].nunique() == 1 and cands["period"].map(lambda v: clean(v) or "").nunique() == 1
-    return same_kind and all(units) and len(set(units)) == len(units)
+    vtypes = [(clean(v) or "").lower() for v in cands["value_type"]] if "value_type" in cands else [""] * len(cands)
+    if all(units) and len(set(units)) == len(units) and len(set(vtypes)) <= 1:
+        return "datum"
+    if all(vtypes) and len(set(vtypes)) == len(vtypes) and len(set(units)) <= 1:
+        return "value type"
+    return None
 
 
 _MEASURE_COLUMNS = ("measure_uri", "station_reference", "station_label", "register_parameter", "register_qualifier", "period", "unit_name",
@@ -420,8 +428,10 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
             id_note = "; ".join(x for x in (id_note, pref_note) if x)
         if len(cands) == 1:
             add(row, "matched", id_note, cands.iloc[0].to_dict())
-        elif _differ_only_by_datum(cands):
-            note = "; ".join(x for x in (f"{len(cands)} {family} measures differ only by datum (unit_name), each matched", id_note) if x)
+        elif _variant_kind(cands):
+            kind = _variant_kind(cands)
+            what = "datum (unit_name)" if kind == "datum" else "value type (register_value_type)"
+            note = "; ".join(x for x in (f"{len(cands)} {family} measures differ only by {what}, each matched", id_note) if x)
             for c in cands.to_dict("records"):
                 add(row, "matched", note, c)
         else:

@@ -381,3 +381,19 @@ def test_ids_are_compared_without_regard_to_leading_zeros_between_the_import_lis
     assert n == 0 and len(out) == len(rows)                       # the file has 083280: nothing is added as import-only
     gone = flag_out_of_scope(rows, pd.DataFrame({"FFFS_ID": ["83280"], "Keep": ["FALSE"]}))
     assert set(gone["match_status"]) == {"out_of_scope"}           # a FALSE line without the zero still finds its row
+
+
+def test_rain_gauge_measures_that_differ_only_by_value_type_are_each_matched():
+    reg = pd.DataFrame({"measure_uri": ["m/075497-i", "m/075497-t"], "station_reference": ["075497"] * 2, "station_label": ["Rainfall station"] * 2,
+                        "parameter": ["rainfall"] * 2, "qualifier": ["Tipping Bucket Raingauge"] * 2, "period": ["900"] * 2,
+                        "unit_name": ["mm", "mm"], "value_type": ["instantaneous", "total"]})
+    rows, _ = match_mapping(mapping([("a", "P1", "Rain", "P.obs", "075497", "Rainfall", None, "1")]), reg)
+    assert list(rows["match_status"]) == ["matched", "matched"] and set(rows["register_value_type"]) == {"instantaneous", "total"}
+    assert "differ only by value type" in rows.iloc[0]["match_note"]
+    # Different units AND different value types, or a different period: still ambiguous.
+    reg2 = reg.copy()
+    reg2["unit_name"] = ["mm", "in"]
+    assert set(match_mapping(mapping([("a", "P1", "Rain", "P.obs", "075497", "Rainfall", None, "1")]), reg2)[0]["match_status"]) == {"ambiguous"}
+    reg3 = reg.copy()
+    reg3["period"] = ["900", "3600"]
+    assert set(match_mapping(mapping([("a", "P1", "Rain", "P.obs", "075497", "Rainfall", None, "1")]), reg3)[0]["match_status"]) == {"ambiguous"}
