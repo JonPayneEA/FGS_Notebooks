@@ -244,3 +244,19 @@ def test_a_keep_column_removes_the_rows_marked_false_even_if_they_matched():
     assert plain.loc["a", "match_status"] == "matched" and "out of scope" in plain.loc["a", "match_note"]
     # Every Keep is TRUE: nothing is set aside.
     assert flag_out_of_scope(rows, pd.DataFrame({"FFFS_ID": ["N1"], "Keep": ["TRUE"]})).equals(rows)
+
+
+def test_a_station_with_logged_and_two_stage_forms_settles_on_the_stage_in_a_datum():
+    reg = pd.DataFrame({"measure_uri": ["m/4048-nodatum", "m/4048-logged", "m/4048-stage"], "station_reference": ["4048"] * 3,
+                        "station_label": ["Wingfield Park"] * 3, "parameter": ["level"] * 3,
+                        "qualifier": ["Stage", "Logged", "Stage"], "period": ["900"] * 3, "unit_name": ["---", "mASD", "mASD"]})
+    rows, _ = match_mapping(mapping([("a", "WP1", "Wingfield Park", "H.obs", "4048", "Water Level", None, "4048")]), reg)
+    assert list(rows["match_status"]) == ["matched"] and rows.iloc[0]["measure_uri"] == "m/4048-stage"
+    assert "Logged level set aside" in rows.iloc[0]["match_note"] and "no datum" in rows.iloc[0]["match_note"]
+    # A file that names Logged still gets the Logged measure.
+    rows, _ = match_mapping(mapping([("a", "WP1", "Wingfield Park", "H.obs", "4048", "Water Level", "Logged", "4048")]), reg)
+    assert rows.iloc[0]["measure_uri"] == "m/4048-logged"
+    # Only no-datum and Logged measures with nothing better: nothing is emptied, so the row stays ambiguous or matched, never lost.
+    reg2 = reg[reg["measure_uri"] != "m/4048-stage"]
+    rows, _ = match_mapping(mapping([("a", "WP1", "Wingfield Park", "H.obs", "4048", "Water Level", None, "4048")]), reg2)
+    assert len(rows) >= 1 and rows["match_status"].isin(["matched", "ambiguous"]).all()

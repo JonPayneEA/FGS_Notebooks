@@ -175,6 +175,29 @@ def prepare_register(register: pd.DataFrame) -> pd.DataFrame:
     return r
 
 
+_NO_DATUM = {"", "---", "--", "-"}
+
+
+def _prefer_stage_in_datum(cands: pd.DataFrame):
+    """
+    Narrow several level measures at one station when the file does not name a qualifier. Some stations
+    export a Logged level beside the Stage level, and the Stage in two forms (with a datum such as mASD, and
+    with none). Logged is dropped where a non-Logged measure exists, then the no-datum measure is dropped
+    where one with a datum exists. Never empties the set. Returns (candidates, note).
+    """
+    notes = []
+    logged = cands["qualifier_key"].str.contains("logged", na=False)
+    if logged.any() and not logged.all():
+        cands = cands[~logged]
+        notes.append("Logged level set aside")
+    unit = cands["unit_name"].map(lambda v: (clean(v) or "").strip().lower())
+    nodatum = unit.isin(_NO_DATUM)
+    if nodatum.any() and not nodatum.all():
+        cands = cands[~nodatum]
+        notes.append("level with no datum set aside")
+    return cands, "; ".join(notes)
+
+
 _MEASURE_COLUMNS = ("measure_uri", "station_reference", "station_label", "register_parameter", "register_qualifier", "period", "unit_name")
 
 
@@ -321,10 +344,14 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
             have = ", ".join(sorted({f or "unknown" for f in station["family"]}))
             add(row, "no_parameter", f"the station has no {family} measure (it has: {have})")
             continue
+        by_file_qualifier = False
         if len(cands) > 1 and row["parameter_qualifier"]:
             same = cands[cands["qualifier_key"] == row["parameter_qualifier"].lower()]
             if len(same) >= 1:
-                cands = same
+                cands, by_file_qualifier = same, True
+        if len(cands) > 1 and family == "level" and not by_file_qualifier:
+            cands, pref_note = _prefer_stage_in_datum(cands)
+            id_note = "; ".join(x for x in (id_note, pref_note) if x)
         if len(cands) == 1:
             add(row, "matched", id_note, cands.iloc[0].to_dict())
         else:
