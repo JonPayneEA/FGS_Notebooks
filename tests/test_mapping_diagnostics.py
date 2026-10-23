@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.mapping_diagnostics import (  # noqa: E402
     candidate_measures, candidate_summary, classify_ambiguity, matched_name_check, name_similarity, stage_pairs,
-    id_shape, keep_true_status, pair_by_external_id, profile_unplaced, station_candidates, tidal_summary, tidy_id, unmapped_measures, welsh_hint,
+    id_shape, keep_true_status, pair_by_external_id, profile_unpaired_kept, profile_unplaced, station_candidates, tidal_summary, tidy_id, unmapped_measures, welsh_hint,
 )
 
 STATIONS = pd.DataFrame({
@@ -215,3 +215,21 @@ def test_a_kept_row_the_file_cannot_place_is_tried_on_its_external_id():
     assert out.loc["2453TH", "paired_via"] == "ExternalID" and out.loc["2453TH", "data_state"] == "delivers data"
     assert not out.loc["ZZ1", "paired"] and out.loc["ZZ1", "external_status"] == "no_station" and out.loc["ZZ1", "data_state"] == "not paired"
     assert out.loc["OK1", "paired_via"] == "mapping file" and out.loc["OK1", "data_state"] == "delivers data"
+
+
+def test_unpaired_kept_rows_are_profiled_by_id_shape_source_and_unknown_parameter():
+    kept = pd.DataFrame({
+        "FFFS_ID": ["a", "b", "c", "d", "e"], "Parameter": ["H.obs", "H.obs", "H.obs", "X.obs", "X.obs"],
+        "ExternalID": ["E14521", "E8980", "2230TH", "77", "78"], "ExternalParameter": ["Water Level"] * 3 + ["Mystery", "Mystery"],
+        "ImportSource": ["Telemetry"] * 5, "in_mapping": [True, False, True, True, True], "paired": [False] * 5,
+        "match_status": ["no_station", "not in the mapping file", "no_station", "unknown_parameter", "unknown_parameter"],
+        "location_name": ["Llyn Brenig", None, "Knighton Main", None, None]})
+    prof = profile_unpaired_kept(kept)
+    shapes = prof["shapes"].set_index("shape")
+    assert shapes.loc["A99999", "rows"] == 1 and shapes.loc["A9999", "in_mapping_file"] == 0
+    assert shapes.loc["9999AA", "rows"] == 1 and shapes.loc["9999AA", "in_mapping_file"] == 1
+    assert prof["prefixes"].set_index("first_two_characters").loc["E1", "rows"] == 1
+    assert prof["shapes"]["rows"].sum() == 3                                   # unknown_parameter rows are not here
+    assert prof["shapes"]["welsh_name_hint"].sum() == 1
+    assert list(prof["unknown_parameter"]["rows"]) == [2]
+    assert prof["sources"].iloc[0]["rows"] == 3
