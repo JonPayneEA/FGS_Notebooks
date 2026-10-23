@@ -1287,7 +1287,11 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     readings in the feed (Welsh sites, which no rule can match). For rows reached only by a similar
     name it lists the candidate stations' measures, with value type and whether they are tidal levels.
     For `ambiguous` it says whether picking the shortest period would settle it. It also
-    lists the register measures nothing points at. The logic is in `utils/mapping_diagnostics.py`.
+    lists the register measures nothing points at. Section 8 reads `Import_Timeseries.csv`, keeps the rows
+    marked `Keep = TRUE`, and shows for each whether it paired to a real-time measure, or why not (the status
+    and note, or that neither its `FFFS_ID` nor its `ExternalID` is a row of the mapping file), with counts by
+    status and by `ImportSource`. The `export_path` widget writes that list to a CSV. The logic is in
+    `utils/mapping_diagnostics.py`.
 
   ```sql
   -- How the mapping rows matched.
