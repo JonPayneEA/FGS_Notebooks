@@ -1350,6 +1350,8 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     hint) and the parameter words of those whose parameter is unknown. For the unpaired digits-only `ExternalID`s it
     also shows what the register holds that looks like each (as written, zero-padded, with a prefix or a suffix) and a
     verdict, so a rule that did not fire can be told from an ID the feed does not carry.
+    The `gaps_path` widget writes the unpaired rows to a CSV with a verdict and what to do about each (ask the feed
+    owner, check the ID, accept the gap), for whoever can act on them.
     A second check looks every unpaired ExternalID up in the register and the station list (by stationReference,
     notation, RLOIid and wiskiID) and says whether the station is listed with no measures, listed under another key, or
     not in the feed at all. A kept row the mapping file cannot place (`no_station`, or not in the file) is

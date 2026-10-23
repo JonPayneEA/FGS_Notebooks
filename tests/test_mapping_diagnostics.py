@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.mapping_diagnostics import (  # noqa: E402
     candidate_measures, candidate_summary, classify_ambiguity, matched_name_check, name_similarity, stage_pairs,
-    id_shape, keep_true_status, listed_station_check, numeric_id_variants, pair_by_external_id, profile_unpaired_kept, profile_unplaced, station_candidates, tidal_summary, tidy_id, unmapped_measures, welsh_hint,
+    gap_list, id_shape, keep_true_status, listed_station_check, numeric_id_variants, pair_by_external_id, profile_unpaired_kept, profile_unplaced, station_candidates, tidal_summary, tidy_id, unmapped_measures, welsh_hint,
 )
 
 STATIONS = pd.DataFrame({
@@ -296,3 +296,19 @@ def test_an_ambiguous_kept_row_lists_its_candidates_and_what_differs_instead_of_
     assert not out["paired"] and out["match_status"] == "ambiguous" and out["measure_uri"] is None
     assert out["n_candidates"] == 2 and "Mean-15_min-mAOD" in out["candidate_measures"] and "Mean-15_min-m" in out["candidate_measures"]
     assert out["ambiguity_why"] == "differ by unit (datum)"
+
+
+def test_the_gap_list_gives_each_unpaired_row_a_verdict_and_what_to_do():
+    kept = pd.DataFrame({"FFFS_ID": ["a", "b", "c", "d", "e"], "Parameter": ["H.obs"] * 5, "ExternalID": ["S9", "ZZ9", "S5", "Q1", "Q2"],
+                         "ExternalParameter": ["Water Level"] * 5, "ImportSource": ["Telemetry"] * 5, "paired": [False] * 5,
+                         "match_status": ["no_station", "no_station", "ambiguous", "no_parameter", "matched"],
+                         "station_reference": [None, None, "S5", "Q1", "Q2"], "station_label": [None, None, "Five", "Q", "Q"],
+                         "ambiguity_why": [None, None, "differ by unit (datum)", None, None], "match_note": ["x"] * 5})
+    lc = pd.DataFrame({"external_id": ["S9", "ZZ9"],
+                       "verdict": ["station listed, no measures in the register", "not in the station list either"],
+                       "listed_by": ["stationReference", None], "station_reference": ["S9", None], "station_label": ["Nine", None]})
+    out = gap_list(kept, lc).set_index("FFFS_ID")
+    assert out.loc["a", "verdict"] == "station listed, no measures in the register" and "Ask the feed owner" in out.loc["a", "what_to_do"]
+    assert "outside the feed" in out.loc["b", "what_to_do"]
+    assert out.loc["c", "verdict"] == "ambiguous: differ by unit (datum)"
+    assert out.loc["d", "verdict"].startswith("no_parameter")

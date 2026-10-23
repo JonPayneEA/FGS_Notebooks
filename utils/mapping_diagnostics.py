@@ -649,3 +649,58 @@ def listed_station_check(kept: pd.DataFrame, register: pd.DataFrame, stations: p
             out.append((e, status, f"listed under {nice[hit[1][0]]}: the station reference differs from the ExternalID", nice[hit[1][0]],
                         hit[1][1], hit[1][2]))
     return pd.DataFrame(out, columns=cols)
+
+
+_ASK = {
+    "station listed, no measures in the register": "The feed lists the station but gives it no measures. Ask the feed owner, or accept the gap.",
+    "not in the station list either": "The feed does not know this ID. Check the ID, or whether the site is outside the feed (Wales, Scotland, "
+                                      "the Channel Islands); consider Keep = FALSE.",
+    "a measure exists in the register: something else stopped the match": "A measure exists. Look at the match note: something else blocked the match.",
+}
+
+
+def gap_list(kept: pd.DataFrame, lc: pd.DataFrame) -> pd.DataFrame:
+    """
+    The kept rows that did not pair, one line each, with a verdict and what to do about it, for sending to whoever can act.
+
+    Args:
+        kept: pair_by_external_id() output.
+        lc:   listed_station_check() output (external_id, verdict, listed_by, station_reference, station_label).
+
+    Returns:
+        FFFS_ID, Parameter, ExternalID, ExternalParameter, ImportSource, match_status, verdict, what_to_do, station_reference,
+        station_label, match_note. The verdict is the station-list verdict for rows with no station, else the match status
+        (no_parameter: the station has no measure of this kind; ambiguous: what differs between the candidates).
+    """
+    import re as _re
+    norm = {_re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in kept.columns}
+    ecol = norm.get("externalid")
+    un = kept[~kept["paired"]].copy()
+    look = {}
+    for _, r in lc.iterrows():
+        look.setdefault(clean(r["external_id"]), r)
+    verdicts, todo, refs, labels = [], [], [], []
+    for _, r in un.iterrows():
+        hit = look.get(clean(r[ecol])) if ecol else None
+        status = r["match_status"]
+        if status in ("no_station", "not in the mapping file", "no_telemetry_id") and hit is not None:
+            v = hit["verdict"]
+            if v.startswith("listed under"):
+                t = f"The station reference differs from the ExternalID: a rule can map it ({hit['station_reference']})."
+            else:
+                t = _ASK.get(v, "")
+            verdicts.append(v), todo.append(t), refs.append(hit["station_reference"]), labels.append(hit["station_label"])
+        elif status == "ambiguous":
+            verdicts.append("ambiguous: " + (r.get("ambiguity_why") or "several measures fit"))
+            todo.append("Choose which candidate measure to use, or say all of them are wanted.")
+            refs.append(r.get("station_reference")), labels.append(r.get("station_label"))
+        elif status == "no_parameter":
+            verdicts.append("no_parameter: the station has no measure of this kind")
+            todo.append("The feed has the station but not this kind of measure (gate position, say). Accept the gap.")
+            refs.append(r.get("station_reference")), labels.append(r.get("station_label"))
+        else:
+            verdicts.append(status), todo.append(""), refs.append(r.get("station_reference")), labels.append(r.get("station_label"))
+    un["verdict"], un["what_to_do"], un["station_reference"], un["station_label"] = verdicts, todo, refs, labels
+    keep_cols = [c for c in (norm.get("fffsid"), norm.get("parameter"), ecol, norm.get("externalparameter"), norm.get("importsource")) if c]
+    cols = keep_cols + ["match_status", "verdict", "what_to_do", "station_reference", "station_label", "match_note"]
+    return un[cols].sort_values(["verdict"] + keep_cols[:1]).reset_index(drop=True)
