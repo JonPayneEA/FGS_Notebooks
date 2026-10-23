@@ -154,7 +154,13 @@ def test_two_measures_with_data_are_settled_only_if_one_is_recent():
     assert settled == 1 and list(out["measure_uri"]) == ["m/live"]
     still = activity([("m/live", 900, "2020-01-01", "2026-10-22 11:45"), ("m/dead", 900, "2020-01-01", "2026-10-21 11:45")])
     out, settled = settle_by_readings(rows, still, NOW)
-    assert settled == 0 and list(out["match_status"]) == ["ambiguous", "ambiguous"]      # both live: not guessed
+    # Both live and exact duplicates: the one with the most readings, then the latest, is used, and the note names the other.
+    assert settled == 1 and list(out["measure_uri"]) == ["m/live"] and "duplicate measures" in out.loc[0, "match_note"] and "m/dead" in out.loc[0, "match_note"]
+    unlike = register([("m/a", "023041", "level", "Stage", "900"), ("m/b", "023041", "level", "Stage", "300")])
+    rows2, _ = match_mapping(mapping([("a", "F1", "Gauge", "H.obs", "023041", "Water Level", "Stage", "9")]), unlike)
+    both_live = activity([("m/a", 900, "2020-01-01", "2026-10-22 11:45"), ("m/b", 900, "2020-01-01", "2026-10-22 11:45")])
+    out, settled = settle_by_readings(rows2, both_live, NOW)
+    assert settled == 0 and list(out["match_status"]) == ["ambiguous", "ambiguous"]      # different periods: not duplicates, not guessed
     assert list(out["n_readings"]) == [900, 900]
     out, settled = settle_by_readings(rows, activity([]), NOW)                            # neither has data
     assert settled == 0 and list(out["n_readings"]) == [0, 0]
@@ -411,3 +417,18 @@ def test_wind_and_gate_parameters_are_known_families_and_wind_direction_and_spee
     by = rows.set_index("id")
     assert by.loc["a", "measure_uri"] == "m/w-dir" and by.loc["b", "measure_uri"] == "m/w-speed"
     assert by.loc["c", "match_status"] == "no_parameter"      # a known kind, but the feed has no gate measure
+
+
+def test_exact_duplicate_measures_that_both_deliver_are_settled_on_the_one_with_most_readings():
+    reg = pd.DataFrame({"measure_uri": ["http://x/measures/E73639-anglian-level-tidal_level-Mean-15_min-mAOD",
+                                        "http://x/measures/E73639-level-tidal_level-Mean-15_min-mAOD"],
+                        "station_reference": ["E73639"] * 2, "station_label": ["Workington"] * 2, "parameter": ["level"] * 2,
+                        "qualifier": ["Tidal Level"] * 2, "period": ["900"] * 2, "unit_name": ["mAOD"] * 2, "value_type": ["mean"] * 2})
+    rows, _ = match_mapping(mapping([("a", "UKCFF_WORK", "Workington", "H.obs", "E73639", "Water Level", None, "1")]), reg)
+    assert set(rows["match_status"]) == {"ambiguous"} and len(rows) == 2
+    activity_ = pd.DataFrame({"measure_uri": list(reg["measure_uri"]), "n_readings": [900, 400],
+                              "first_reading": ["2026-01-01"] * 2, "last_reading": ["2026-10-22"] * 2})
+    out, n = settle_by_readings(rows, activity_, pd.Timestamp("2026-10-23"))
+    assert n == 1 and len(out) == 1 and out.iloc[0]["match_status"] == "matched"
+    assert out.iloc[0]["measure_uri"].endswith("E73639-anglian-level-tidal_level-Mean-15_min-mAOD")
+    assert "E73639-level-tidal_level-Mean-15_min-mAOD" in out.iloc[0]["match_note"]

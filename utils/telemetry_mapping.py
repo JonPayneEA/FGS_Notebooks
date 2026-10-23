@@ -589,6 +589,18 @@ def settle_by_readings(rows: pd.DataFrame, activity: pd.DataFrame, now, recent_d
             recent = with_data[last.loc[with_data.index] >= cutoff]
             if len(recent) == 1:
                 chosen, why = recent.index[0], f"settled by readings: the other candidate(s) have none in the last {recent_days} days"
+            else:
+                # Several deliver and they are exact duplicates of one another (the same gauge listed twice by the feed):
+                # take the one with the most readings, then the latest reading, then the URI, and say which others there are.
+                pool = recent if len(recent) > 1 else with_data
+                keys = pool[[c for c in ("register_qualifier", "period", "unit_name", "register_value_type") if c in pool]].apply(
+                    lambda col: col.map(lambda v: (clean(v) or "").lower()))
+                if len(keys.drop_duplicates()) == 1:
+                    order = pool.assign(_last=last.loc[pool.index]).sort_values(["n_readings", "_last", "measure_uri"], ascending=[False, False, True])
+                    chosen = order.index[0]
+                    others = ", ".join((clean(u) or "").split("/measures/")[-1] for u in order["measure_uri"].iloc[1:])
+                    why = ("settled by readings: duplicate measures (identical qualifier, period, unit and value type); "
+                           f"the one with the most readings is used; also listed by the feed: {others}")
         if chosen is None:
             continue
         r.loc[chosen, "match_status"], r.loc[chosen, "match_note"] = "matched", why
