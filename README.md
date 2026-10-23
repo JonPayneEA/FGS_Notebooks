@@ -1240,6 +1240,10 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     file's `TelemetryID`, and its note says the `ExternalID` found it. A suspended or silent station still
     matches, and `n_readings` of 0 shows that it delivers nothing. Rows marked Keep = FALSE are not retried. The
     `external_id_fallback` widget switches it off.
+  - **Leading zeros.** Excel drops them from numeric IDs (`22006` for station `022006`). An ID of digits only and shorter
+    than six, which is not a station reference as written, is tried with leading zeros restored to six digits; the
+    note says so. An ID that matches as written is never padded. This applies to the file's `TelemetryID` and to the
+    import list's `ExternalID` in the fallback.
   - **An FFFS_ID that is TRUE and FALSE.** An `FFFS_ID` can be on the import list twice: TRUE for its real-time
     source and FALSE for another (NRW, say). A FALSE line then removes only the mapping row whose `TelemetryID` is that
     line's `ExternalID`; the TRUE row is kept and matched. An `FFFS_ID` that is FALSE only is removed as before.
