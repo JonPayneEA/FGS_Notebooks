@@ -261,3 +261,12 @@ def test_unpaired_ids_are_checked_against_the_register_and_the_station_list():
     assert out.loc["W-1", "listed_by"] == "wiskiID" and out.loc["W-1", "station_reference"] == "S77"
     assert out.loc["ZZ9", "verdict"] == "not in the station list either"
     assert out.loc["074", "verdict"] == "not in the station list either"
+
+
+def test_a_kept_row_is_found_in_the_mapping_when_only_leading_zeros_differ():
+    mapping = pd.DataFrame([{"id": "1", "fffs_id": "083280", "telemetry_id": "083280", "match_status": "matched", "measure_uri": "m/1",
+                             "station_reference": "083280", "station_label": "Rain", "n_readings": 5, "match_note": ""}])
+    scope = pd.DataFrame({"FFFS_ID": ["83280"], "Parameter": ["P.obs"], "ExternalID": ["83280"], "ExternalParameter": ["Rainfall"],
+                          "ImportSource": ["Telemetry"], "Keep": ["TRUE"]})
+    out = keep_true_status(scope, mapping)
+    assert bool(out.iloc[0]["in_mapping"]) and bool(out.iloc[0]["paired"]) and out.iloc[0]["measure_uri"] == "m/1"

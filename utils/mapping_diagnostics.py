@@ -28,7 +28,7 @@ from difflib import SequenceMatcher
 
 import pandas as pd
 
-from utils.telemetry_mapping import family_of_text, clean
+from utils.telemetry_mapping import family_of_text, clean, id_key
 
 # Routes, best first. A row's best route is the earliest in this list that found a station.
 ROUTES = ["RLOIid", "notation", "wiskiID", "wiskiID = TelemetryID", "same after tidy-up", "similar name"]
@@ -374,15 +374,15 @@ def keep_true_status(scope: pd.DataFrame, rows: pd.DataFrame) -> pd.DataFrame:
     ecol = norm.get("externalid")
     keep = scope[scope[kcol].map(lambda v: (clean(v) or "").lower() in _TRUE_WORDS)]
     by_fffs, by_tel = {}, {}
-    for rec in rows.to_dict("records"):
-        if clean(rec.get("fffs_id")):
-            by_fffs.setdefault(clean(rec["fffs_id"]), []).append(rec)
-        if clean(rec.get("telemetry_id")):
-            by_tel.setdefault(clean(rec["telemetry_id"]), []).append(rec)
+    for rec in rows.to_dict("records"):          # joined on id_key: Excel drops leading zeros in some files and not others
+        if id_key(rec.get("fffs_id")):
+            by_fffs.setdefault(id_key(rec["fffs_id"]), []).append(rec)
+        if id_key(rec.get("telemetry_id")):
+            by_tel.setdefault(id_key(rec["telemetry_id"]), []).append(rec)
     out = []
     for r in keep.to_dict("records"):
         fid, eid = clean(r.get(fcol)), (clean(r.get(ecol)) if ecol else None)
-        lines = by_fffs.get(fid) or (by_tel.get(eid) if eid else None) or []
+        lines = by_fffs.get(id_key(fid)) or (by_tel.get(id_key(eid)) if eid else None) or []
         line = {"FFFS_ID": fid}
         for key in ("parameter", "externalid", "externalparameter", "importsource"):
             if norm.get(key):

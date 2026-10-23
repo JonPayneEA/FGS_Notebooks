@@ -1249,6 +1249,10 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     added to `ea_rt_telemetry_mapping` as a new line (id `import_<n>`) when it matches or is ambiguous, so its data
     reaches the link to the thresholds. The note says it comes from the import list alone. It runs with the
     `external_id_fallback` widget.
+  - **Matching IDs between the files.** The import list and the mapping file are joined on a key that ignores case
+    and leading zeros (`83280` and `083280`, `E05720` and `E5720`, `155TH` and `0155TH`), because Excel drops
+    zeros in some files and not in others. It applies to the Keep list, the ExternalID fallback, the import-list-only
+    rows and section 8. It is never used to look a station up.
   - **Leading zeros.** Excel drops them from numeric IDs (`22006` for station `022006`). An ID of digits only and shorter
     than six, which is not a station reference as written, is tried with leading zeros restored to six digits; the
     note says so. An ID that matches as written is never padded. This applies to the file's `TelemetryID` and to the

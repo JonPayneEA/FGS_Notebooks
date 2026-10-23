@@ -8,7 +8,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.telemetry_mapping import (  # noqa: E402
-    add_import_only_rows, clean, fallback_external_id, family_of_code, family_of_text, flag_inactive, flag_out_of_scope, match_mapping, prepare_mapping, reconcile_family, settle_by_readings,
+    add_import_only_rows, clean, id_key, fallback_external_id, family_of_code, family_of_text, flag_inactive, flag_out_of_scope, match_mapping, prepare_mapping, reconcile_family, settle_by_readings,
 )
 
 
@@ -365,3 +365,19 @@ def test_import_rows_the_mapping_file_lacks_are_added_when_their_external_id_fin
     assert "import list only" in new["match_note"] and "leading zeros restored" in new["match_note"]
     same, n0 = add_import_only_rows(rows, m, pd.DataFrame({"FFFS_ID": ["x"], "ExternalID": ["y"]}), reg)
     assert n0 == 0 and len(same) == len(rows)
+
+
+def test_ids_are_compared_without_regard_to_leading_zeros_between_the_import_list_and_the_mapping_file():
+    assert id_key("083280") == id_key("83280") == "83280"
+    assert id_key("E05720") == id_key("e5720") == "E5720"
+    assert id_key("0155TH") == id_key("155th") == "155TH"
+    assert id_key("2230_w1TH") == "2230_W1TH" and id_key(None) is None and id_key("000") == "0"
+    reg = register([("m/083280", "083280", "rainfall", "Tipping Bucket Raingauge", "900")])
+    m = mapping([("1", "083280", "Rain", "P.obs", "083280", "Rainfall", None, "1")])
+    rows, _ = match_mapping(m, reg)
+    scope = pd.DataFrame({"FFFS_ID": ["83280", "83280"], "Parameter": ["P.obs", "P.obs"], "ExternalID": ["83280", "N9"],
+                          "ExternalParameter": ["Rainfall", "Rainfall"], "Keep": ["TRUE", "FALSE"]})
+    out, n = add_import_only_rows(rows, m, scope, reg)
+    assert n == 0 and len(out) == len(rows)                       # the file has 083280: nothing is added as import-only
+    gone = flag_out_of_scope(rows, pd.DataFrame({"FFFS_ID": ["83280"], "Keep": ["FALSE"]}))
+    assert set(gone["match_status"]) == {"out_of_scope"}           # a FALSE line without the zero still finds its row
