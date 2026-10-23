@@ -370,6 +370,54 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
     return rows, report
 
 
+def fallback_external_id(rows: pd.DataFrame, mapping: pd.DataFrame, scope: pd.DataFrame, register: pd.DataFrame):
+    """
+    Second chance for mapping rows that found no station: use the import list's ExternalID as the station reference.
+
+    The mapping file's TelemetryID is sometimes not a station reference (a WISKI-style id, an old number) where the
+    import list's ExternalID for the same FFFS_ID is (FFFS 2230_w1TH has TelemetryID 2230_w1TH and ExternalID
+    2230TH). A row with status no_station or no_telemetry_id whose FFFS_ID is on the list, with an ExternalID that
+    differs from its TelemetryID, is matched again with the ExternalID in its place, keeping its own parameter and
+    qualifier. A retry that matches (or is ambiguous) replaces the row, keeps the file's TelemetryID and says in
+    the note what happened; one that still finds nothing leaves the row as it was. Rows marked Keep = FALSE are
+    never retried. Columns are matched without regard to case, spaces or underscores.
+
+    Returns (rows, n): the rows, and the number of mapping rows newly matched.
+    """
+    if rows.empty or scope is None or scope.empty:
+        return rows, 0
+    norm = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in scope.columns}
+    fcol, ecol, kcol = norm.get("fffsid"), norm.get("externalid"), norm.get("keep")
+    if not fcol or not ecol:
+        return rows, 0
+    if kcol:
+        scope = scope[~scope[kcol].map(lambda v: (clean(v) or "").lower() in _FALSE_WORDS)]
+    ext = {}
+    for f, e in zip(scope[fcol], scope[ecol]):
+        if clean(f) and clean(e) and clean(f) not in ext:
+            ext[clean(f)] = clean(e)
+    stuck = rows[rows["match_status"].isin(["no_station", "no_telemetry_id"])].drop_duplicates("id")
+    stuck = stuck[stuck["fffs_id"].map(lambda f: clean(f) in ext)]
+    stuck = stuck[[ext[clean(f)] != clean(t) for f, t in zip(stuck["fffs_id"], stuck["telemetry_id"])]]
+    if stuck.empty:
+        return rows, 0
+    sub = mapping[mapping["id"].isin(stuck["id"])].copy()
+    original = dict(zip(sub["id"], sub["telemetry_id"]))
+    sub["telemetry_id"] = [ext[clean(f)] for f in sub["fffs_id"]]
+    retried, _ = match_mapping(sub, register)
+    retried = retried[retried["match_status"].isin(["matched", "ambiguous"])].copy()
+    if retried.empty:
+        return rows, 0
+    retried["match_note"] = [
+        "; ".join(x for x in (f"matched through the import list's ExternalID {t} (the file's TelemetryID {original[i] or 'is blank'} found no station)",
+                              n or "") if x)
+        for i, t, n in zip(retried["id"], retried["telemetry_id"], retried["match_note"])]
+    retried["telemetry_id"] = retried["id"].map(original)
+    keep_rows = rows[~rows["id"].isin(retried["id"])]
+    out = pd.concat([keep_rows, retried[[c for c in rows.columns if c in retried.columns]]], ignore_index=True)
+    return out, int(retried[retried["match_status"] == "matched"]["id"].nunique())
+
+
 def settle_by_readings(rows: pd.DataFrame, activity: pd.DataFrame, now, recent_days: int = 30):
     """
     Settle ambiguous rows using which candidate measures actually have readings, and add n_readings,

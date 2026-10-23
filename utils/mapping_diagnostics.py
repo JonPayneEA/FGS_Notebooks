@@ -400,3 +400,73 @@ def keep_true_status(scope: pd.DataFrame, rows: pd.DataFrame) -> pd.DataFrame:
                          "match_note": "neither the FFFS_ID nor the ExternalID is a row of the mapping file"})
         out.append(line)
     return pd.DataFrame(out)
+
+
+_RETRY_STATUSES = {"no_station", "no_telemetry_id", "not in the mapping file"}
+
+
+def pair_by_external_id(kept: pd.DataFrame, register: pd.DataFrame, activity=None, now=None) -> pd.DataFrame:
+    """
+    For kept rows the mapping file could not place, try the import list's own ExternalID as the station reference.
+
+    The mapping file's TelemetryID is sometimes not the station reference (a WISKI-style id, an old number),
+    where the import list's ExternalID is (2230TH). Only rows whose status is no_station, no_telemetry_id or
+    not in the mapping file are retried, with the list's Parameter and ExternalParameter naming the family.
+
+    Args:
+        kept:     keep_true_status() output (needs FFFS_ID, ExternalID, Parameter, ExternalParameter, paired,
+                  match_status; any column with "qualifier" in its name is used as the qualifier).
+        register: the measure register (measure_uri, station_reference, station_label, parameter, qualifier,
+                  period, unit_name).
+        activity: optional measure_uri, n_readings, first_reading, last_reading (as in notebook 16); with it an
+                  ambiguous retry is settled by readings and every match carries n_readings.
+        now:      the time for "recent" in settling; defaults to now.
+
+    Returns:
+        kept with paired_via ("mapping file", "ExternalID" or None) and external_status, external_measure_uri,
+        external_station_reference, external_station_label, external_n_readings, external_last_reading and
+        external_note. A row matched through its ExternalID has paired = True. data_state says "delivers data",
+        "matched, no readings" (the station is in the register but the measure delivers nothing, as a suspended
+        station does) or "not paired".
+    """
+    from utils.telemetry_mapping import match_mapping, prepare_mapping, settle_by_readings
+    out = kept.copy()
+    new = ("external_status", "external_measure_uri", "external_station_reference", "external_station_label",
+           "external_n_readings", "external_last_reading", "external_note")
+    for c in new:
+        out[c] = None
+    out["paired_via"] = out["paired"].map(lambda p: "mapping file" if p else None)
+    norm = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in out.columns}
+    ecol, pcol, xcol = norm.get("externalid"), norm.get("parameter"), norm.get("externalparameter")
+    qcol = next((c for k, c in norm.items() if "qualifier" in k), None)
+    todo = out[(~out["paired"]) & out["match_status"].isin(_RETRY_STATUSES)] if ecol else out.iloc[0:0]
+    todo = todo[todo[ecol].map(lambda v: bool(clean(v)))]
+    if not todo.empty:
+        raw = pd.DataFrame({"ID": [str(i) for i in todo.index], "FFFS_ID": todo["FFFS_ID"].values, "FFFSLocName": None,
+                            "ParameterID": todo[pcol].values if pcol else None, "TelemetryID": todo[ecol].values,
+                            "TelemetryParameter": todo[xcol].values if xcol else None,
+                            "ParameterQualifier": todo[qcol].values if qcol else None, "WISKI_ID": None})
+        rows, _ = match_mapping(prepare_mapping(raw)[0], register)
+        if activity is not None and len(activity):
+            rows, _ = settle_by_readings(rows, activity, now if now is not None else pd.Timestamp.now())
+        for rid, g in rows.groupby("id"):
+            idx = int(rid)
+            best = g.iloc[0]
+            out.loc[idx, "external_status"] = best["match_status"]
+            out.loc[idx, "external_note"] = best.get("match_note")
+            if best["match_status"] in ("matched", "ambiguous"):
+                out.loc[idx, "external_measure_uri"] = best.get("measure_uri") if best["match_status"] == "matched" else None
+                out.loc[idx, "external_station_reference"] = best.get("station_reference")
+                out.loc[idx, "external_station_label"] = best.get("station_label")
+            if best["match_status"] == "matched":
+                out.loc[idx, "external_n_readings"] = best.get("n_readings") if "n_readings" in g else None
+                out.loc[idx, "external_last_reading"] = best.get("last_reading") if "last_reading" in g else None
+                out.loc[idx, "paired"] = True
+                out.loc[idx, "paired_via"] = "ExternalID"
+    nread = pd.to_numeric(out["external_n_readings"], errors="coerce")
+    mapped_n = pd.to_numeric(out["n_readings"], errors="coerce")
+    delivers = ((out["paired_via"] == "mapping file") & (mapped_n.fillna(0) > 0)) | ((out["paired_via"] == "ExternalID") & (nread.fillna(0) > 0))
+    out["data_state"] = "not paired"
+    out.loc[out["paired_via"].notna(), "data_state"] = "matched, no readings"
+    out.loc[delivers, "data_state"] = "delivers data"
+    return out

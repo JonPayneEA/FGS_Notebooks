@@ -8,7 +8,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.telemetry_mapping import (  # noqa: E402
-    clean, family_of_code, family_of_text, flag_inactive, flag_out_of_scope, match_mapping, prepare_mapping, reconcile_family, settle_by_readings,
+    clean, fallback_external_id, family_of_code, family_of_text, flag_inactive, flag_out_of_scope, match_mapping, prepare_mapping, reconcile_family, settle_by_readings,
 )
 
 
@@ -260,3 +260,25 @@ def test_a_station_with_logged_and_two_stage_forms_settles_on_the_stage_in_a_dat
     reg2 = reg[reg["measure_uri"] != "m/4048-stage"]
     rows, _ = match_mapping(mapping([("a", "WP1", "Wingfield Park", "H.obs", "4048", "Water Level", None, "4048")]), reg2)
     assert len(rows) >= 1 and rows["match_status"].isin(["matched", "ambiguous"]).all()
+
+
+def test_a_row_with_no_station_is_retried_on_the_import_lists_external_id():
+    reg = register([("m/2230TH-stage", "2230TH", "level", "Stage", "900"), ("m/2230TH-down", "2230TH", "level", "Downstream Stage", "900")])
+    m = mapping([("1", "2230_w1TH", "Knighton Main", "H.obs", "2230_w1TH", "Water Level", "Stage", "2230_w1TH"),
+                 ("2", "NOPE", "Nowhere", "H.obs", "E9999", "Water Level", None, "9"),
+                 ("3", "GONE", "Dropped", "H.obs", "2230_w2TH", "Water Level", "Stage", "9")])
+    rows, _ = match_mapping(m, reg)
+    assert set(rows["match_status"]) == {"no_station"}
+    scope = pd.DataFrame({"FFFS_ID": ["2230_w1TH", "NOPE", "GONE"], "ExternalID": ["2230TH", "E9999", "2230TH"],
+                          "Keep": ["TRUE", "TRUE", "FALSE"]})
+    out, n = fallback_external_id(rows, m, scope, reg)
+    by = out.set_index("id")
+    assert n == 1
+    assert by.loc["1", "match_status"] == "matched" and by.loc["1", "measure_uri"] == "m/2230TH-stage"
+    assert by.loc["1", "telemetry_id"] == "2230_w1TH"                       # the file's own TelemetryID is kept
+    assert "ExternalID 2230TH" in by.loc["1", "match_note"]
+    assert by.loc["2", "match_status"] == "no_station"                      # the ExternalID found nothing either
+    assert by.loc["3", "match_status"] == "no_station"                      # Keep = FALSE is never retried
+    assert len(out) == 3
+    same, n0 = fallback_external_id(rows, m, pd.DataFrame({"FFFS_ID": ["x"], "ExternalID": ["y"]}), reg)
+    assert n0 == 0 and len(same) == 3
