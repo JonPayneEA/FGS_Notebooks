@@ -198,6 +198,15 @@ def _prefer_stage_in_datum(cands: pd.DataFrame):
     return cands, "; ".join(notes)
 
 
+def _differ_only_by_datum(cands: pd.DataFrame) -> bool:
+    """True when several measures share the qualifier and the period and differ only in unit_name (mAOD, mASD ...)."""
+    if len(cands) < 2:
+        return False
+    units = [(clean(v) or "").lower() for v in cands["unit_name"]]
+    same_kind = cands["qualifier_key"].nunique() == 1 and cands["period"].map(lambda v: clean(v) or "").nunique() == 1
+    return same_kind and all(units) and len(set(units)) == len(units)
+
+
 _MEASURE_COLUMNS = ("measure_uri", "station_reference", "station_label", "register_parameter", "register_qualifier", "period", "unit_name")
 
 
@@ -354,6 +363,10 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
             id_note = "; ".join(x for x in (id_note, pref_note) if x)
         if len(cands) == 1:
             add(row, "matched", id_note, cands.iloc[0].to_dict())
+        elif _differ_only_by_datum(cands):
+            note = "; ".join(x for x in (f"{len(cands)} {family} measures differ only by datum (unit_name), each matched", id_note) if x)
+            for c in cands.to_dict("records"):
+                add(row, "matched", note, c)
         else:
             for c in cands.to_dict("records"):
                 add(row, "ambiguous", "; ".join(x for x in (f"{len(cands)} {family} measures fit", id_note) if x), c)

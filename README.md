@@ -1240,6 +1240,10 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     file's `TelemetryID`, and its note says the `ExternalID` found it. A suspended or silent station still
     matches, and `n_readings` of 0 shows that it delivers nothing. Rows marked Keep = FALSE are not retried. The
     `external_id_fallback` widget switches it off.
+  - **Datum variants.** Where several measures at a station share the qualifier and the period and differ only
+    in `unit_name` (mAOD and mASD), none is dropped: each is `matched`, so one mapping row has a line per datum, and
+    `unit_name` tells them apart in `ea_rt_telemetry_mapping` and `ea_rt_measures_mapped`. A difference in
+    qualifier or period is still ambiguous.
   - **Logged levels and datums.** Some stations export a Logged level beside the Stage level, and the Stage in
     two forms (with a datum such as mASD, and with none). Where the file names no qualifier, a level match
     drops the Logged measure when a Stage exists, then drops the no-datum measure when a datum one exists. The

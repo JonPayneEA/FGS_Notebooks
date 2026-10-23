@@ -282,3 +282,17 @@ def test_a_row_with_no_station_is_retried_on_the_import_lists_external_id():
     assert len(out) == 3
     same, n0 = fallback_external_id(rows, m, pd.DataFrame({"FFFS_ID": ["x"], "ExternalID": ["y"]}), reg)
     assert n0 == 0 and len(same) == 3
+
+
+def test_level_measures_that_differ_only_by_datum_are_each_matched_with_the_unit_kept():
+    reg = pd.DataFrame({"measure_uri": ["m/a-maod", "m/a-masd"], "station_reference": ["4098"] * 2, "station_label": ["Keadby"] * 2,
+                        "parameter": ["level"] * 2, "qualifier": ["Tidal Level"] * 2, "period": ["300"] * 2, "unit_name": ["mAOD", "mASD"]})
+    rows, report = match_mapping(mapping([("a", "KEA1", "Keadby", "H.obs", "4098", "Water Level", None, "4098")]), reg)
+    assert list(rows["match_status"]) == ["matched", "matched"]
+    assert set(rows["measure_uri"]) == {"m/a-maod", "m/a-masd"} and set(rows["unit_name"]) == {"mAOD", "mASD"}
+    assert "differ only by datum" in rows.iloc[0]["match_note"]
+    # A different period or qualifier is a real ambiguity, not a datum variant.
+    reg2 = reg.copy()
+    reg2.loc[1, "period"] = "900"
+    rows, _ = match_mapping(mapping([("a", "KEA1", "Keadby", "H.obs", "4098", "Water Level", None, "4098")]), reg2)
+    assert set(rows["match_status"]) == {"ambiguous"}
