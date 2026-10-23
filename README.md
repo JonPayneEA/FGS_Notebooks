@@ -1344,7 +1344,8 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     lists the register measures nothing points at. Section 8 reads `Import_Timeseries.csv`, keeps the rows
     marked `Keep = TRUE`, and shows for each whether it paired to a real-time measure, or why not (the status
     and note, or that neither its `FFFS_ID` nor its `ExternalID` is a row of the mapping file), with counts by
-    status and by `ImportSource`, then profiles the kept rows that did not pair: the shape and first characters of the
+    status and by `ImportSource`. A row that is `ambiguous` shows no measure (none was chosen) and instead
+    `n_candidates`, `candidate_measures` and `ambiguity_why` (what differs: station, qualifier, period, unit or value type). Then it profiles the kept rows that did not pair: the shape and first characters of the
     `ExternalID` of those with no station (with how many are in the mapping file and how many have a Welsh place-name
     hint) and the parameter words of those whose parameter is unknown. For the unpaired digits-only `ExternalID`s it
     also shows what the register holds that looks like each (as written, zero-padded, with a prefix or a suffix) and a

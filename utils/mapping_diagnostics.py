@@ -356,6 +356,21 @@ _TRUE_WORDS = {"true", "t", "yes", "y", "1", "1.0"}
 _STATUS_ORDER = ["matched", "ambiguous", "conflict", "no_parameter", "unknown_parameter", "no_station", "inactive", "out_of_scope", "no_telemetry_id"]
 
 
+def _tail(uri) -> str:
+    """The part of a measure URI after /measures/, which is what tells measures apart."""
+    return (clean(uri) or "").split("/measures/")[-1]
+
+
+def _why_ambiguous(lines: list) -> str:
+    """What differs between ambiguous candidate lines: qualifier, period, unit (datum), value type, or nothing (a duplicate)."""
+    fields = (("qualifier", "register_qualifier"), ("period", "period"), ("unit (datum)", "unit_name"), ("value type", "register_value_type"))
+    differ = [name for name, key in fields if len({(clean(x.get(key)) or "").lower() for x in lines}) > 1]
+    stations = {clean(x.get("station_reference")) for x in lines}
+    if len(stations) > 1:
+        differ.insert(0, "station")
+    return ("differ by " + ", ".join(differ)) if differ else "identical qualifier, period, unit and value type (duplicate measures)"
+
+
 def keep_true_status(scope: pd.DataFrame, rows: pd.DataFrame) -> pd.DataFrame:
     """
     The rows of the import list that are marked Keep = TRUE, each with whether it paired to a real-time measure.
@@ -396,12 +411,18 @@ def keep_true_status(scope: pd.DataFrame, rows: pd.DataFrame) -> pd.DataFrame:
         if lines:
             lines = sorted(lines, key=lambda x: _STATUS_ORDER.index(x["match_status"]) if x.get("match_status") in _STATUS_ORDER else 99)
             best = lines[0]
+            same = [x for x in lines if x.get("match_status") == best.get("match_status") and x.get("measure_uri")]
+            ambiguous = best.get("match_status") == "ambiguous"
+            line.update({"n_candidates": len(same) or None,
+                         "candidate_measures": " | ".join(_tail(x.get("measure_uri")) for x in same) if len(same) > 1 else None,
+                         "ambiguity_why": _why_ambiguous(same) if ambiguous else None})
             line.update({"in_mapping": True, "paired": best.get("match_status") == "matched",
-                         "match_status": best.get("match_status"), "measure_uri": best.get("measure_uri"),
+                         "match_status": best.get("match_status"), "measure_uri": None if ambiguous else best.get("measure_uri"),
                          "station_reference": best.get("station_reference"), "station_label": best.get("station_label"),
                          "n_readings": best.get("n_readings"), "match_note": best.get("match_note"),
                          "location_name": clean(best.get("fffs_location_name"))})
         else:
+            line.update({"n_candidates": None, "candidate_measures": None, "ambiguity_why": None})
             line.update({"in_mapping": False, "paired": False, "match_status": "not in the mapping file", "measure_uri": None,
                          "station_reference": None, "station_label": None, "n_readings": None,
                          "match_note": "neither the FFFS_ID nor the ExternalID is a row of the mapping file", "location_name": None})
