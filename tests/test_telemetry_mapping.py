@@ -308,3 +308,16 @@ def test_level_measures_that_differ_only_by_datum_are_each_matched_with_the_unit
     reg2.loc[1, "period"] = "900"
     rows, _ = match_mapping(mapping([("a", "KEA1", "Keadby", "H.obs", "4098", "Water Level", None, "4098")]), reg2)
     assert set(rows["match_status"]) == {"ambiguous"}
+
+
+def test_a_numeric_id_that_lost_its_leading_zero_is_matched_with_it_restored_only_when_as_written_fails():
+    reg = register([("m/022006", "022006", "level", "Stage", "900"), ("m/2001", "2001", "level", "Stage", "900")])
+    m = mapping([("1", "A", "Lost zero", "H.obs", "22006", "Water Level", None, "1"),
+                 ("2", "B", "Four digits as written", "H.obs", "2001", "Water Level", None, "2"),
+                 ("3", "C", "Nothing", "H.obs", "31999", "Water Level", None, "3")])
+    rows, _ = match_mapping(m, reg)
+    by = rows.set_index("id")
+    assert by.loc["1", "match_status"] == "matched" and by.loc["1", "measure_uri"] == "m/022006"
+    assert "leading zeros restored" in by.loc["1", "match_note"] and by.loc["1", "telemetry_id"] == "22006"
+    assert by.loc["2", "measure_uri"] == "m/2001" and not by.loc["2", "match_note"]
+    assert by.loc["3", "match_status"] == "no_station"

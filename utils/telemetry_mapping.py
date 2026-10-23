@@ -74,7 +74,9 @@ _TEXT_FAMILIES = [("groundwater", "groundwater"), ("wave", "wave"), ("shingle", 
 _CODE_FAMILIES = {"h": "level", "q": "flow", "p": "rainfall", "gw": "groundwater", "wave": "wave", "shingle": "shingle"}
 
 _SCIENTIFIC = re.compile(r"^\d+(\.\d+)?[eE][+-]?\d+$")
-# "067033_TG 148": a space between _TG and the number that ends the ID. Nothing else is rewritten.
+# "067033_TG 148": a space between _TG and the number that ends the ID. Nothing else is rewritten, except that an
+# all-digit ID shorter than six digits is tried with leading zeros restored (Excel drops them: 22006 is 022006), and
+# only when the ID as written is not a station reference.
 _TG_SPACE = re.compile(r"(_TG)\s+(\d+)$", re.IGNORECASE)
 
 
@@ -360,6 +362,11 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
                 station = by_station.get(underscored)
                 if station is not None:
                     id_note = f"TelemetryID matched as {underscored} (the space after _TG changed to an underscore)"
+        if station is None and tid.isdigit() and len(tid) < 6:
+            padded = tid.zfill(6)                       # Excel drops the leading zero: 22006 is station 022006
+            station = by_station.get(padded)
+            if station is not None:
+                id_note = f"TelemetryID matched as {padded} (leading zeros restored)"
         if station is None:
             add(row, "no_station", "no measure in the register has this station reference")
             continue
