@@ -178,14 +178,15 @@ def prepare_register(register: pd.DataFrame) -> pd.DataFrame:
 _MEASURE_COLUMNS = ("measure_uri", "station_reference", "station_label", "register_parameter", "register_qualifier", "period", "unit_name")
 
 
-def _set_aside(rows: pd.DataFrame, mask: pd.Series, status: str, note, keep_note_for_matched: str):
+def _set_aside(rows: pd.DataFrame, mask: pd.Series, status: str, note, keep_note_for_matched: str, override_matched: bool = False):
     """
     Give every UNMATCHED mapping row selected by `mask` the status `status`, collapsed to one line with no
     measure. A selected row that matched a measure is left matched and gets keep_note_for_matched on its
-    note. `note` is a string, or a function of the row's FFFS id and TelemetryID giving its own note.
+    note, unless override_matched is true, when it is set aside too and its link is removed. `note` is a
+    string, or a function of the row's FFFS id and TelemetryID giving its own note.
     """
     r = rows.copy()
-    matched_ids = set(r.loc[mask & (r["match_status"] == "matched"), "id"])
+    matched_ids = set() if override_matched else set(r.loc[mask & (r["match_status"] == "matched"), "id"])
     kept = mask & r["id"].isin(matched_ids)
     r.loc[kept, "match_note"] = r.loc[kept, "match_note"].fillna("").map(
         lambda n: (n + "; " if n else "") + keep_note_for_matched)
@@ -215,20 +216,38 @@ def flag_inactive(rows: pd.DataFrame) -> pd.DataFrame:
                       "the location name says INACTIVE")
 
 
+_FALSE_WORDS = {"false", "f", "no", "n", "0", "0.0"}
+
+
 def flag_out_of_scope(rows: pd.DataFrame, scope: pd.DataFrame) -> pd.DataFrame:
     """
     Set aside mapping rows that are known to be outside what the real-time feed covers (Welsh sites, for one),
-    from a list the user supplies. `scope` has an fffs_id and/or telemetry_id column and an optional reason.
-    A listed row that matched nothing gets the status out_of_scope with the reason as its note; one that
-    matched a measure stays matched, with a note. Columns are matched without regard to case, spaces or
-    underscores (FFFS_ID, FFFS ID and fffs_id are the same).
+    from a list the user supplies. `scope` has an fffs_id and/or telemetry_id column, and optionally:
+      reason   the note given to the row;
+      keep     TRUE or FALSE. With a Keep column only the rows marked FALSE are on the list (the others are
+               kept and ignored), and a row marked FALSE is set aside EVEN IF IT MATCHED a measure: the list
+               is the user's decision that the row is not wanted, and its link is removed;
+      importsource  added to the note when there is no reason (Astro, say).
+    Without a Keep column, a listed row that matched nothing gets the status out_of_scope with the reason as
+    its note, and one that matched a measure stays matched, with a note. Columns are matched without regard
+    to case, spaces or underscores (FFFS_ID, FFFS ID and fffs_id are the same).
     """
     if rows.empty or scope is None or scope.empty:
         return rows
     norm = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in scope.columns}
     fcol, tcol, rcol = norm.get("fffsid"), norm.get("telemetryid"), norm.get("reason")
+    kcol, scol = norm.get("keep"), norm.get("importsource")
     if not fcol and not tcol:
         raise ValueError(f"The out-of-scope list needs an FFFS_ID or TelemetryID column. Columns present: {list(scope.columns)}")
+    if kcol:
+        # Only the rows marked FALSE are on the list. A blank Keep is not a decision, so it stays.
+        scope = scope[scope[kcol].map(lambda v: (clean(v) or "").lower() in _FALSE_WORDS)].copy()
+        if scope.empty:
+            return rows
+        if not rcol:
+            scope["Reason"] = [("Keep = FALSE" + (f" ({clean(s)})" if scol and clean(s) else "")) for s in
+                               (scope[scol] if scol else [None] * len(scope))]
+            rcol = "Reason"
     fff = {clean(v) for v in scope[fcol]} - {None} if fcol else set()
     tel = {clean(v) for v in scope[tcol]} - {None} if tcol else set()
     reasons = {}
@@ -243,7 +262,8 @@ def flag_out_of_scope(rows: pd.DataFrame, scope: pd.DataFrame) -> pd.DataFrame:
 
     def note(f, t):
         return reasons.get(("fffs_id", clean(f))) or reasons.get(("telemetry_id", clean(t))) or "listed as out of scope"
-    return _set_aside(rows, listed, "out_of_scope", note, "listed as out of scope, but matched a measure")
+    return _set_aside(rows, listed, "out_of_scope", note, "listed as out of scope, but matched a measure",
+                      override_matched=bool(kcol))
 
 
 def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
