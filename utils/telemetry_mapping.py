@@ -68,10 +68,11 @@ OUTPUT_FIELDS = ["id", "fffs_id", "fffs_location_name", "parameter_id", "telemet
 
 # Keyword to family, in order: the first that appears in the text wins, so groundwater is tested
 # before level and "wave height" before the bare word.
-_TEXT_FAMILIES = [("groundwater", "groundwater"), ("wave", "wave"), ("shingle", "shingle"), ("rain", "rainfall"),
-                  ("flow", "flow"), ("level", "level"), ("stage", "level")]
+_TEXT_FAMILIES = [("groundwater", "groundwater"), ("wave", "wave"), ("shingle", "shingle"), ("gate", "gate"), ("wind", "wind"),
+                  ("rain", "rainfall"), ("flow", "flow"), ("level", "level"), ("stage", "level")]
 # ParameterID prefix (before the first dot) to family.
-_CODE_FAMILIES = {"h": "level", "q": "flow", "p": "rainfall", "gw": "groundwater", "wave": "wave", "shingle": "shingle"}
+_CODE_FAMILIES = {"h": "level", "q": "flow", "p": "rainfall", "gw": "groundwater", "wave": "wave", "shingle": "shingle",
+                  "gate": "gate", "wind": "wind"}
 
 _SCIENTIFIC = re.compile(r"^\d+(\.\d+)?[eE][+-]?\d+$")
 # "067033_TG 148": a space between _TG and the number that ends the ID. Nothing else is rewritten, except that an
@@ -423,6 +424,15 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
             same = cands[cands["qualifier_key"] == row["parameter_qualifier"].lower()]
             if len(same) >= 1:
                 cands, by_file_qualifier = same, True
+        if len(cands) > 1 and family == "wind":
+            # Wind.obs.dir is the direction and Wind.obs.speed the speed: choose the measure whose text says so.
+            pid = (row["parameter_id"] or "").lower()
+            word = "dir" if ".dir" in pid else "speed" if ".speed" in pid else None
+            if word:
+                text = (cands["qualifier"].fillna("") + " " + cands["parameter"].fillna("")).str.lower()
+                sel = cands[text.str.contains(word)]
+                if len(sel) >= 1:
+                    cands = sel
         if len(cands) > 1 and family == "level" and not by_file_qualifier:
             cands, pref_note = _prefer_stage_in_datum(cands)
             id_note = "; ".join(x for x in (id_note, pref_note) if x)

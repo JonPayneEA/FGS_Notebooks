@@ -397,3 +397,17 @@ def test_rain_gauge_measures_that_differ_only_by_value_type_are_each_matched():
     reg3 = reg.copy()
     reg3["period"] = ["900", "3600"]
     assert set(match_mapping(mapping([("a", "P1", "Rain", "P.obs", "075497", "Rainfall", None, "1")]), reg3)[0]["match_status"]) == {"ambiguous"}
+
+
+def test_wind_and_gate_parameters_are_known_families_and_wind_direction_and_speed_are_told_apart():
+    assert family_of_text("Wind") == "wind" and family_of_text("Gate Position") == "gate"
+    assert family_of_code("Wind.obs.dir") == "wind" and family_of_code("Gate.perc.open") == "gate"
+    reg = pd.DataFrame({"measure_uri": ["m/w-dir", "m/w-speed"], "station_reference": ["W1"] * 2, "station_label": ["Windy"] * 2,
+                        "parameter": ["wind", "wind"], "qualifier": ["Direction", "Speed"], "period": ["900", "900"],
+                        "unit_name": ["deg", "m/s"], "value_type": ["instantaneous", "instantaneous"]})
+    rows, _ = match_mapping(mapping([("a", "X1", "Windy", "Wind.obs.dir", "W1", "Wind", None, "1"),
+                                     ("b", "X2", "Windy", "Wind.obs.speed", "W1", "Wind", None, "2"),
+                                     ("c", "X3", "Gate", "Gate.perc.open", "W1", "Gate Position", None, "3")]), reg)
+    by = rows.set_index("id")
+    assert by.loc["a", "measure_uri"] == "m/w-dir" and by.loc["b", "measure_uri"] == "m/w-speed"
+    assert by.loc["c", "match_status"] == "no_parameter"      # a known kind, but the feed has no gate measure

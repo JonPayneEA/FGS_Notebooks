@@ -1249,6 +1249,11 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     added to `ea_rt_telemetry_mapping` as a new line (id `import_<n>`) when it matches or is ambiguous, so its data
     reaches the link to the thresholds. The note says it comes from the import list alone. It runs with the
     `external_id_fallback` widget.
+  - **Wind and gate parameters.** `Wind.obs.dir` and `Wind.obs.speed` (and the text Wind) are the wind family, and
+    `Gate.obs.position`, `Gate.perc.open` and `Gate.perc.closed` (Gate Position) the gate family, so these rows no longer read
+    `unknown_parameter`. A wind row picks the measure whose text says direction or speed. The feed has no gate measure,
+    so gate rows will read `no_parameter` or `no_station`, which says what is true: the station exists in the file
+    but there is nothing to match.
   - **Value-type variants.** Where several measures at a station share the qualifier and period and differ only in value
     type (a rain gauge's instantaneous tipping bucket reading and its 15-minute total, both in mm), each is `matched`,
     and `register_value_type` tells them apart. Anything joining a gauge to its data should filter on it. It follows the
