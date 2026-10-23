@@ -282,3 +282,17 @@ def test_ambiguity_says_when_candidates_differ_by_unit_or_value_type():
     a = classify_ambiguity(rows).set_index("id")
     assert a.loc["r", "why"] == "same qualifier and period; differ by value type" and a.loc["r", "value_types"] == "instantaneous | total"
     assert a.loc["t", "why"] == "same qualifier and period; differ by unit (datum)" and a.loc["t", "units"] == "m | maod"
+
+
+def test_an_ambiguous_kept_row_lists_its_candidates_and_what_differs_instead_of_showing_one_as_paired():
+    base = {"id": "1", "fffs_id": "UKCFF_WORK", "telemetry_id": "E73639", "match_status": "ambiguous", "station_reference": "E73639",
+            "station_label": "Workington", "n_readings": 5, "match_note": "2 tidal level measures fit", "register_qualifier": "Tidal Level",
+            "period": "900", "register_value_type": "mean"}
+    mapping = pd.DataFrame([{**base, "measure_uri": "http://x/measures/E73639-anglian-level-tidal_level-Mean-15_min-mAOD", "unit_name": "mAOD"},
+                            {**base, "measure_uri": "http://x/measures/E73639-level-tidal_level-Mean-15_min-m", "unit_name": "m"}])
+    scope = pd.DataFrame({"FFFS_ID": ["UKCFF_WORK"], "Parameter": ["H.obs"], "ExternalID": ["E73639"], "ExternalParameter": ["Water Level"],
+                          "ImportSource": ["UKCFF Tide Gauge"], "Keep": ["TRUE"]})
+    out = keep_true_status(scope, mapping).iloc[0]
+    assert not out["paired"] and out["match_status"] == "ambiguous" and out["measure_uri"] is None
+    assert out["n_candidates"] == 2 and "Mean-15_min-mAOD" in out["candidate_measures"] and "Mean-15_min-m" in out["candidate_measures"]
+    assert out["ambiguity_why"] == "differ by unit (datum)"
