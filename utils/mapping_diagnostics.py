@@ -560,3 +560,65 @@ def numeric_id_variants(kept: pd.DataFrame, register: pd.DataFrame, max_examples
                     "found_zero_padded_7_8": ", ".join(padded78), "ends_with": ", ".join(ends), "starts_with": ", ".join(starts),
                     "verdict": verdict})
     return pd.DataFrame(out, columns=cols)
+
+
+def listed_station_check(kept: pd.DataFrame, register: pd.DataFrame, stations: pd.DataFrame) -> pd.DataFrame:
+    """
+    For every unpaired kept row with no station, whether the feed knows the ExternalID at all.
+
+    Each ExternalID (and, for digits only and shorter than six, its zero-padded form) is looked up in the measure
+    register's station references and in the station list (stationReference, notation, RLOIid, wiskiID). The
+    verdict separates the cases a new rule or a request to the data team would each fix:
+        a measure exists in the register          something else stopped the match
+        station listed, no measures in the register   the feed lists the station but gives it no measure (suspended,
+                                                  or Wales); no rule can match it
+        listed under RLOIid / wiskiID / notation  the station reference differs from the ExternalID: a rule can map it
+        not in the station list either            the feed has never heard of it
+
+    Args:
+        kept:     pair_by_external_id() output (needs paired, match_status, ExternalID).
+        register: the measure register (station_reference).
+        stations: ea_rt_stations (stationReference, notation, RLOIid, wiskiID, label), or an empty frame.
+
+    Returns:
+        external_id, match_status, verdict, listed_by, station_reference, station_label; one line per row.
+    """
+    import re as _re
+    cols = ["external_id", "match_status", "verdict", "listed_by", "station_reference", "station_label"]
+    norm = {_re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in kept.columns}
+    ecol = norm.get("externalid")
+    if not ecol:
+        return pd.DataFrame(columns=cols)
+    refs = {clean(v) for v in register["station_reference"].dropna()} - {None}
+    keys = {}
+    snorm = {_re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in stations.columns}
+    label_col = snorm.get("label") or snorm.get("name")
+    for key_name in ("stationreference", "notation", "rloiid", "wiskiid"):
+        col = snorm.get(key_name)
+        if not col:
+            continue
+        for _, r in stations.iterrows():
+            v = clean(r[col])
+            if v:
+                keys.setdefault(v, []).append((key_name, clean(r[snorm["stationreference"]]) if snorm.get("stationreference") else None,
+                                               clean(r[label_col]) if label_col else None))
+    nice = {"stationreference": "stationReference", "notation": "notation", "rloiid": "RLOIid", "wiskiid": "wiskiID"}
+    un = kept[(~kept["paired"]) & kept["match_status"].isin(["no_station", "no_telemetry_id", "not in the mapping file"])]
+    out = []
+    for eid, status in zip(un[ecol], un["match_status"]):
+        e = clean(eid)
+        if not e:
+            continue
+        forms = [e] + ([e.zfill(6)] if e.isdigit() and len(e) < 6 else [])
+        if any(f in refs for f in forms):
+            out.append((e, status, "a measure exists in the register: something else stopped the match", "register", e, None))
+            continue
+        hit = next(((f, h) for f in forms for h in keys.get(f, [])), None)
+        if hit is None:
+            out.append((e, status, "not in the station list either", None, None, None))
+        elif hit[1][0] == "stationreference":
+            out.append((e, status, "station listed, no measures in the register", "stationReference", hit[1][1], hit[1][2]))
+        else:
+            out.append((e, status, f"listed under {nice[hit[1][0]]}: the station reference differs from the ExternalID", nice[hit[1][0]],
+                        hit[1][1], hit[1][2]))
+    return pd.DataFrame(out, columns=cols)

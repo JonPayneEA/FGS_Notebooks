@@ -1240,6 +1240,15 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     file's `TelemetryID`, and its note says the `ExternalID` found it. A suspended or silent station still
     matches, and `n_readings` of 0 shows that it delivers nothing. Rows marked Keep = FALSE are not retried. The
     `external_id_fallback` widget switches it off.
+  - **Level and groundwater are interchangeable.** A borehole is coded as groundwater in one place and as a level
+    (qualifier Stage) in another. A groundwater row at a station with no groundwater measure uses its level
+    measures, and a level row at a station with no level measure uses its groundwater ones; the note says so. No
+    other pair of families is exchanged.
+  - **Import-list-only rows.** A row of the import list marked Keep = TRUE that the mapping file does not have (a rain
+    gauge it never listed) is matched with its `ExternalID`, using the list's Parameter and ExternalParameter, and
+    added to `ea_rt_telemetry_mapping` as a new line (id `import_<n>`) when it matches or is ambiguous, so its data
+    reaches the link to the thresholds. The note says it comes from the import list alone. It runs with the
+    `external_id_fallback` widget.
   - **Leading zeros.** Excel drops them from numeric IDs (`22006` for station `022006`). An ID of digits only and shorter
     than six, which is not a station reference as written, is tried with leading zeros restored to six digits; the
     note says so. An ID that matches as written is never padded. This applies to the file's `TelemetryID` and to the
@@ -1319,7 +1328,10 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     `ExternalID` of those with no station (with how many are in the mapping file and how many have a Welsh place-name
     hint) and the parameter words of those whose parameter is unknown. For the unpaired digits-only `ExternalID`s it
     also shows what the register holds that looks like each (as written, zero-padded, with a prefix or a suffix) and a
-    verdict, so a rule that did not fire can be told from an ID the feed does not carry. A kept row the mapping file cannot place (`no_station`, or not in the file) is
+    verdict, so a rule that did not fire can be told from an ID the feed does not carry.
+    A second check looks every unpaired ExternalID up in the register and the station list (by stationReference,
+    notation, RLOIid and wiskiID) and says whether the station is listed with no measures, listed under another key, or
+    not in the feed at all. A kept row the mapping file cannot place (`no_station`, or not in the file) is
     retried on the list's own `ExternalID` as the station reference, and each pair is marked `delivers data`
     or `matched, no readings` (a suspended station is in the register but delivers nothing). The `export_path` widget writes that list to a CSV. The logic is in
     `utils/mapping_diagnostics.py`.

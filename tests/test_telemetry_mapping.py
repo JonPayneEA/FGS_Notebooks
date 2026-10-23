@@ -8,7 +8,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.telemetry_mapping import (  # noqa: E402
-    clean, fallback_external_id, family_of_code, family_of_text, flag_inactive, flag_out_of_scope, match_mapping, prepare_mapping, reconcile_family, settle_by_readings,
+    add_import_only_rows, clean, fallback_external_id, family_of_code, family_of_text, flag_inactive, flag_out_of_scope, match_mapping, prepare_mapping, reconcile_family, settle_by_readings,
 )
 
 
@@ -333,3 +333,35 @@ def test_an_instantaneous_level_is_preferred_to_a_mean_when_the_file_names_no_qu
     # Unknown value types are not guessed: both measures differ only by unit, so each is matched as a datum variant.
     rows, _ = match_mapping(mapping([("a", "NH1", "Newhaven", "H.obs", "SE71739", "Water Level", None, "1")]), reg.drop(columns="value_type"))
     assert list(rows["match_status"]) == ["matched", "matched"]
+
+
+def test_a_groundwater_row_falls_back_on_a_level_measure_and_a_level_row_on_a_groundwater_one():
+    reg = pd.DataFrame({"measure_uri": ["m/E46643", "m/E16181"], "station_reference": ["E46643", "E16181"], "station_label": ["Borehole", "Sweeps Lane"],
+                        "parameter": ["level", "level"], "qualifier": ["Stage", "Groundwater"], "period": ["3600", "900"], "unit_name": ["mAOD", "mAOD"],
+                        "value_type": ["instantaneous", "instantaneous"]})
+    rows, _ = match_mapping(mapping([("1", "G1", "Borehole", "GW.obs", "E46643", "Water Level", None, "1"),
+                                     ("2", "G2", "Sweeps", "H.obs", "E16181", "Water Level", None, "2"),
+                                     ("3", "R1", "Rain", "P.obs", "E46643", "Rainfall", None, "3")]), reg)
+    by = rows.set_index("id")
+    assert by.loc["1", "match_status"] == "matched" and by.loc["1", "measure_uri"] == "m/E46643"
+    assert "no groundwater measure" in by.loc["1", "match_note"]
+    assert by.loc["2", "match_status"] == "matched" and by.loc["2", "measure_uri"] == "m/E16181"
+    assert by.loc["3", "match_status"] == "no_parameter"            # only level and groundwater are interchangeable
+
+
+def test_import_rows_the_mapping_file_lacks_are_added_when_their_external_id_finds_a_measure():
+    reg = pd.DataFrame({"measure_uri": ["m/074108", "m/2001"], "station_reference": ["074108", "2001"], "station_label": ["Rainfall station", "Bewdley"],
+                        "parameter": ["rainfall", "level"], "qualifier": ["Tipping Bucket Raingauge", "Stage"], "period": ["900", "900"],
+                        "unit_name": ["mm", "m"], "value_type": ["instantaneous", "instantaneous"]})
+    m = mapping([("1", "BEW1", "Bewdley", "H.obs", "2001", "Water Level", None, "1")])
+    rows, _ = match_mapping(m, reg)
+    scope = pd.DataFrame({"FFFS_ID": ["BEW1", "P74108", "P99999", "GONE", "BLANK"], "Parameter": ["H.obs", "P.obs", "P.obs", "P.obs", "P.obs"],
+                          "ExternalID": ["2001", "74108", "99999", "074108", "074108"], "ExternalParameter": ["Water Level", "Rainfall", "Rainfall", "Rainfall", "Rainfall"],
+                          "Keep": ["TRUE", "TRUE", "TRUE", "FALSE", ""]})
+    out, n = add_import_only_rows(rows, m, scope, reg)
+    assert n == 1 and len(out) == 2                                  # P74108 only: BEW1 is in the file, 99999 finds nothing, GONE/BLANK are not kept
+    new = out[out["fffs_id"] == "P74108"].iloc[0]
+    assert new["match_status"] == "matched" and new["measure_uri"] == "m/074108" and new["telemetry_id"] == "74108"
+    assert "import list only" in new["match_note"] and "leading zeros restored" in new["match_note"]
+    same, n0 = add_import_only_rows(rows, m, pd.DataFrame({"FFFS_ID": ["x"], "ExternalID": ["y"]}), reg)
+    assert n0 == 0 and len(same) == len(rows)
