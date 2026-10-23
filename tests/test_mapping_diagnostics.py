@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.mapping_diagnostics import (  # noqa: E402
     candidate_measures, candidate_summary, classify_ambiguity, matched_name_check, name_similarity, stage_pairs,
-    id_shape, keep_true_status, pair_by_external_id, profile_unpaired_kept, profile_unplaced, station_candidates, tidal_summary, tidy_id, unmapped_measures, welsh_hint,
+    id_shape, keep_true_status, numeric_id_variants, pair_by_external_id, profile_unpaired_kept, profile_unplaced, station_candidates, tidal_summary, tidy_id, unmapped_measures, welsh_hint,
 )
 
 STATIONS = pd.DataFrame({
@@ -233,3 +233,17 @@ def test_unpaired_kept_rows_are_profiled_by_id_shape_source_and_unknown_paramete
     assert prof["shapes"]["welsh_name_hint"].sum() == 1
     assert list(prof["unknown_parameter"]["rows"]) == [2]
     assert prof["sources"].iloc[0]["rows"] == 3
+
+
+def test_numeric_ids_are_checked_against_the_register_in_each_form():
+    reg = pd.DataFrame({"station_reference": ["022006", "2001", "E31999", "0044500", "56000A"]})
+    kept = pd.DataFrame({"ExternalID": ["22006", "2001", "31999", "44500", "56000", "99999", "E1"], "paired": [False] * 7,
+                         "match_status": ["no_station"] * 7})
+    out = numeric_id_variants(kept, reg).set_index("external_id")
+    assert "leading-zero rule" in out.loc["22006", "verdict"]
+    assert "as written" in out.loc["2001", "verdict"]
+    assert out.loc["31999", "ends_with"] == "E31999" and "different rule" in out.loc["31999", "verdict"]
+    assert out.loc["44500", "found_zero_padded_7_8"] == "0044500"
+    assert out.loc["56000", "starts_with"] == "56000A"
+    assert out.loc["99999", "verdict"] == "nothing like it in the register"
+    assert "E1" not in out.index                                   # not digits only

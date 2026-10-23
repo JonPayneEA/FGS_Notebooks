@@ -1317,7 +1317,9 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     and note, or that neither its `FFFS_ID` nor its `ExternalID` is a row of the mapping file), with counts by
     status and by `ImportSource`, then profiles the kept rows that did not pair: the shape and first characters of the
     `ExternalID` of those with no station (with how many are in the mapping file and how many have a Welsh place-name
-    hint) and the parameter words of those whose parameter is unknown. A kept row the mapping file cannot place (`no_station`, or not in the file) is
+    hint) and the parameter words of those whose parameter is unknown. For the unpaired digits-only `ExternalID`s it
+    also shows what the register holds that looks like each (as written, zero-padded, with a prefix or a suffix) and a
+    verdict, so a rule that did not fire can be told from an ID the feed does not carry. A kept row the mapping file cannot place (`no_station`, or not in the file) is
     retried on the list's own `ExternalID` as the station reference, and each pair is marked `delivers data`
     or `matched, no readings` (a suspended station is in the register but delivers nothing). The `export_path` widget writes that list to a CSV. The logic is in
     `utils/mapping_diagnostics.py`.
