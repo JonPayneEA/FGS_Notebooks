@@ -8,7 +8,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.telemetry_mapping import (  # noqa: E402
-    add_import_only_rows, clean, fallback_external_id, family_of_code, family_of_text, flag_inactive, flag_out_of_scope, match_mapping, prepare_mapping, reconcile_family, settle_by_readings,
+    add_import_only_rows, clean, id_key, fallback_external_id, family_of_code, family_of_text, flag_inactive, flag_out_of_scope, match_mapping, prepare_mapping, reconcile_family, settle_by_readings,
 )
 
 
@@ -365,3 +365,49 @@ def test_import_rows_the_mapping_file_lacks_are_added_when_their_external_id_fin
     assert "import list only" in new["match_note"] and "leading zeros restored" in new["match_note"]
     same, n0 = add_import_only_rows(rows, m, pd.DataFrame({"FFFS_ID": ["x"], "ExternalID": ["y"]}), reg)
     assert n0 == 0 and len(same) == len(rows)
+
+
+def test_ids_are_compared_without_regard_to_leading_zeros_between_the_import_list_and_the_mapping_file():
+    assert id_key("083280") == id_key("83280") == "83280"
+    assert id_key("E05720") == id_key("e5720") == "E5720"
+    assert id_key("0155TH") == id_key("155th") == "155TH"
+    assert id_key("2230_w1TH") == "2230_W1TH" and id_key(None) is None and id_key("000") == "0"
+    reg = register([("m/083280", "083280", "rainfall", "Tipping Bucket Raingauge", "900")])
+    m = mapping([("1", "083280", "Rain", "P.obs", "083280", "Rainfall", None, "1")])
+    rows, _ = match_mapping(m, reg)
+    scope = pd.DataFrame({"FFFS_ID": ["83280", "83280"], "Parameter": ["P.obs", "P.obs"], "ExternalID": ["83280", "N9"],
+                          "ExternalParameter": ["Rainfall", "Rainfall"], "Keep": ["TRUE", "FALSE"]})
+    out, n = add_import_only_rows(rows, m, scope, reg)
+    assert n == 0 and len(out) == len(rows)                       # the file has 083280: nothing is added as import-only
+    gone = flag_out_of_scope(rows, pd.DataFrame({"FFFS_ID": ["83280"], "Keep": ["FALSE"]}))
+    assert set(gone["match_status"]) == {"out_of_scope"}           # a FALSE line without the zero still finds its row
+
+
+def test_rain_gauge_measures_that_differ_only_by_value_type_are_each_matched():
+    reg = pd.DataFrame({"measure_uri": ["m/075497-i", "m/075497-t"], "station_reference": ["075497"] * 2, "station_label": ["Rainfall station"] * 2,
+                        "parameter": ["rainfall"] * 2, "qualifier": ["Tipping Bucket Raingauge"] * 2, "period": ["900"] * 2,
+                        "unit_name": ["mm", "mm"], "value_type": ["instantaneous", "total"]})
+    rows, _ = match_mapping(mapping([("a", "P1", "Rain", "P.obs", "075497", "Rainfall", None, "1")]), reg)
+    assert list(rows["match_status"]) == ["matched", "matched"] and set(rows["register_value_type"]) == {"instantaneous", "total"}
+    assert "differ only by value type" in rows.iloc[0]["match_note"]
+    # Different units AND different value types, or a different period: still ambiguous.
+    reg2 = reg.copy()
+    reg2["unit_name"] = ["mm", "in"]
+    assert set(match_mapping(mapping([("a", "P1", "Rain", "P.obs", "075497", "Rainfall", None, "1")]), reg2)[0]["match_status"]) == {"ambiguous"}
+    reg3 = reg.copy()
+    reg3["period"] = ["900", "3600"]
+    assert set(match_mapping(mapping([("a", "P1", "Rain", "P.obs", "075497", "Rainfall", None, "1")]), reg3)[0]["match_status"]) == {"ambiguous"}
+
+
+def test_wind_and_gate_parameters_are_known_families_and_wind_direction_and_speed_are_told_apart():
+    assert family_of_text("Wind") == "wind" and family_of_text("Gate Position") == "gate"
+    assert family_of_code("Wind.obs.dir") == "wind" and family_of_code("Gate.perc.open") == "gate"
+    reg = pd.DataFrame({"measure_uri": ["m/w-dir", "m/w-speed"], "station_reference": ["W1"] * 2, "station_label": ["Windy"] * 2,
+                        "parameter": ["wind", "wind"], "qualifier": ["Direction", "Speed"], "period": ["900", "900"],
+                        "unit_name": ["deg", "m/s"], "value_type": ["instantaneous", "instantaneous"]})
+    rows, _ = match_mapping(mapping([("a", "X1", "Windy", "Wind.obs.dir", "W1", "Wind", None, "1"),
+                                     ("b", "X2", "Windy", "Wind.obs.speed", "W1", "Wind", None, "2"),
+                                     ("c", "X3", "Gate", "Gate.perc.open", "W1", "Gate Position", None, "3")]), reg)
+    by = rows.set_index("id")
+    assert by.loc["a", "measure_uri"] == "m/w-dir" and by.loc["b", "measure_uri"] == "m/w-speed"
+    assert by.loc["c", "match_status"] == "no_parameter"      # a known kind, but the feed has no gate measure

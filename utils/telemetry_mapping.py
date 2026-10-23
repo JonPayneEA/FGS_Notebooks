@@ -68,10 +68,11 @@ OUTPUT_FIELDS = ["id", "fffs_id", "fffs_location_name", "parameter_id", "telemet
 
 # Keyword to family, in order: the first that appears in the text wins, so groundwater is tested
 # before level and "wave height" before the bare word.
-_TEXT_FAMILIES = [("groundwater", "groundwater"), ("wave", "wave"), ("shingle", "shingle"), ("rain", "rainfall"),
-                  ("flow", "flow"), ("level", "level"), ("stage", "level")]
+_TEXT_FAMILIES = [("groundwater", "groundwater"), ("wave", "wave"), ("shingle", "shingle"), ("gate", "gate"), ("wind", "wind"),
+                  ("rain", "rainfall"), ("flow", "flow"), ("level", "level"), ("stage", "level")]
 # ParameterID prefix (before the first dot) to family.
-_CODE_FAMILIES = {"h": "level", "q": "flow", "p": "rainfall", "gw": "groundwater", "wave": "wave", "shingle": "shingle"}
+_CODE_FAMILIES = {"h": "level", "q": "flow", "p": "rainfall", "gw": "groundwater", "wave": "wave", "shingle": "shingle",
+                  "gate": "gate", "wind": "wind"}
 
 _SCIENTIFIC = re.compile(r"^\d+(\.\d+)?[eE][+-]?\d+$")
 # "067033_TG 148": a space between _TG and the number that ends the ID. Nothing else is rewritten, except that an
@@ -95,6 +96,24 @@ def clean(value):
     if re.fullmatch(r"\d+\.0+", text):
         text = text.split(".")[0]
     return text
+
+
+_ID_PARTS = re.compile(r"^([A-Za-z]*)0*(\d+)([A-Za-z]*)$")
+
+
+def id_key(value):
+    """
+    A key for comparing IDs between files that spell them differently: upper case, and leading zeros dropped from the
+    digits (083280 and 83280 are one ID; E05720 and E5720; 0155TH and 155TH). Excel drops them in some files and not in
+    others. None for a missing value. Used to join the import list to the mapping file, never to look up a station.
+    """
+    v = clean(value)
+    if v is None:
+        return None
+    m = _ID_PARTS.match(v)
+    if m:
+        return m.group(1).upper() + (m.group(2).lstrip("0") or "0") + m.group(3).upper()
+    return v.upper()
 
 
 def family_of_text(text):
@@ -207,16 +226,25 @@ def _prefer_stage_in_datum(cands: pd.DataFrame):
     return cands, "; ".join(notes)
 
 
-def _differ_only_by_datum(cands: pd.DataFrame) -> bool:
-    """True when several measures share the qualifier and the period and differ only in unit_name (mAOD, mASD ...)."""
-    if len(cands) < 2:
-        return False
+def _variant_kind(cands: pd.DataFrame):
+    """
+    "datum" or "value type" when several measures share the qualifier and the period and differ only in unit_name
+    (mAOD, mASD ...) or only in value type (instantaneous, total ...), else None. Every measure must differ from the
+    rest by a value that is known, so a blank never makes two measures look different.
+    """
+    if len(cands) < 2 or cands["qualifier_key"].nunique() != 1 or cands["period"].map(lambda v: clean(v) or "").nunique() != 1:
+        return None
     units = [(clean(v) or "").lower() for v in cands["unit_name"]]
-    same_kind = cands["qualifier_key"].nunique() == 1 and cands["period"].map(lambda v: clean(v) or "").nunique() == 1
-    return same_kind and all(units) and len(set(units)) == len(units)
+    vtypes = [(clean(v) or "").lower() for v in cands["value_type"]] if "value_type" in cands else [""] * len(cands)
+    if all(units) and len(set(units)) == len(units) and len(set(vtypes)) <= 1:
+        return "datum"
+    if all(vtypes) and len(set(vtypes)) == len(vtypes) and len(set(units)) <= 1:
+        return "value type"
+    return None
 
 
-_MEASURE_COLUMNS = ("measure_uri", "station_reference", "station_label", "register_parameter", "register_qualifier", "period", "unit_name")
+_MEASURE_COLUMNS = ("measure_uri", "station_reference", "station_label", "register_parameter", "register_qualifier", "period", "unit_name",
+                    "register_value_type")
 
 
 def _set_aside(rows: pd.DataFrame, mask: pd.Series, status: str, note, keep_note_for_matched: str, override_matched: bool = False):
@@ -287,10 +315,10 @@ def flag_out_of_scope(rows: pd.DataFrame, scope: pd.DataFrame) -> pd.DataFrame:
         # An FFFS_ID can be on the list twice: TRUE for the real-time source and FALSE for another (NRW, say). Note both,
         # so that a FALSE line removes only the mapping row it describes (the one whose TelemetryID is its ExternalID).
         if fcol and ecol:
-            kept_ids = {clean(f) for f, k in zip(scope[fcol], scope[kcol]) if clean(f) and (clean(k) or "").lower() in _TRUE_WORDS}
+            kept_ids = {id_key(f) for f, k in zip(scope[fcol], scope[kcol]) if id_key(f) and (clean(k) or "").lower() in _TRUE_WORDS}
             for f, e, k in zip(scope[fcol], scope[ecol], scope[kcol]):
-                if clean(f) and clean(f) in kept_ids and (clean(k) or "").lower() in _FALSE_WORDS:
-                    false_ext.setdefault(clean(f), set()).add(clean(e))
+                if id_key(f) and id_key(f) in kept_ids and (clean(k) or "").lower() in _FALSE_WORDS:
+                    false_ext.setdefault(id_key(f), set()).add(id_key(e))
         # Only the rows marked FALSE are on the list. A blank Keep is not a decision, so it stays.
         scope = scope[scope[kcol].map(lambda v: (clean(v) or "").lower() in _FALSE_WORDS)].copy()
         if scope.empty:
@@ -299,25 +327,25 @@ def flag_out_of_scope(rows: pd.DataFrame, scope: pd.DataFrame) -> pd.DataFrame:
             scope["Reason"] = [("Keep = FALSE" + (f" ({clean(s)})" if scol and clean(s) else "")) for s in
                                (scope[scol] if scol else [None] * len(scope))]
             rcol = "Reason"
-    fff = {clean(v) for v in scope[fcol]} - {None} if fcol else set()
-    tel = {clean(v) for v in scope[tcol]} - {None} if tcol else set()
+    fff = {id_key(v) for v in scope[fcol]} - {None} if fcol else set()
+    tel = {id_key(v) for v in scope[tcol]} - {None} if tcol else set()
     reasons = {}
     for col, key in ((fcol, "fffs_id"), (tcol, "telemetry_id")):
         if col:
             for k, why in zip(scope[col], scope[rcol] if rcol else [None] * len(scope)):
-                if clean(k):
-                    reasons[(key, clean(k))] = clean(why) or "listed as out of scope"
-    listed = rows["fffs_id"].map(clean).isin(fff) | rows["telemetry_id"].map(clean).isin(tel)
+                if id_key(k):
+                    reasons[(key, id_key(k))] = clean(why) or "listed as out of scope"
+    listed = rows["fffs_id"].map(id_key).isin(fff) | rows["telemetry_id"].map(id_key).isin(tel)
     if false_ext:
         # An FFFS_ID that is both TRUE and FALSE: only the row whose TelemetryID is a FALSE line's ExternalID is set aside.
-        mixed = rows["fffs_id"].map(clean).isin(false_ext.keys())
-        own = [clean(t) in false_ext.get(clean(f), ()) for f, t in zip(rows["fffs_id"], rows["telemetry_id"])]
+        mixed = rows["fffs_id"].map(id_key).isin(false_ext.keys())
+        own = [id_key(t) in false_ext.get(id_key(f), ()) for f, t in zip(rows["fffs_id"], rows["telemetry_id"])]
         listed = listed & ~(mixed & ~pd.Series(own, index=rows.index))
     if not listed.any():
         return rows
 
     def note(f, t):
-        return reasons.get(("fffs_id", clean(f))) or reasons.get(("telemetry_id", clean(t))) or "listed as out of scope"
+        return reasons.get(("fffs_id", id_key(f))) or reasons.get(("telemetry_id", id_key(t))) or "listed as out of scope"
     return _set_aside(rows, listed, "out_of_scope", note, "listed as out of scope, but matched a measure",
                       override_matched=bool(kcol))
 
@@ -342,7 +370,8 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
         rec["match_status"], rec["match_note"] = status, note
         for src, dst in (("measure_uri", "measure_uri"), ("station_reference", "station_reference"),
                          ("station_label", "station_label"), ("parameter", "register_parameter"),
-                         ("qualifier", "register_qualifier"), ("period", "period"), ("unit_name", "unit_name")):
+                         ("qualifier", "register_qualifier"), ("period", "period"), ("unit_name", "unit_name"),
+                         ("value_type", "register_value_type")):
             rec[dst] = None if cand is None else _none(cand.get(src))
         out.append(rec)
         examples.setdefault(status, [])
@@ -395,13 +424,24 @@ def match_mapping(mapping: pd.DataFrame, register: pd.DataFrame):
             same = cands[cands["qualifier_key"] == row["parameter_qualifier"].lower()]
             if len(same) >= 1:
                 cands, by_file_qualifier = same, True
+        if len(cands) > 1 and family == "wind":
+            # Wind.obs.dir is the direction and Wind.obs.speed the speed: choose the measure whose text says so.
+            pid = (row["parameter_id"] or "").lower()
+            word = "dir" if ".dir" in pid else "speed" if ".speed" in pid else None
+            if word:
+                text = (cands["qualifier"].fillna("") + " " + cands["parameter"].fillna("")).str.lower()
+                sel = cands[text.str.contains(word)]
+                if len(sel) >= 1:
+                    cands = sel
         if len(cands) > 1 and family == "level" and not by_file_qualifier:
             cands, pref_note = _prefer_stage_in_datum(cands)
             id_note = "; ".join(x for x in (id_note, pref_note) if x)
         if len(cands) == 1:
             add(row, "matched", id_note, cands.iloc[0].to_dict())
-        elif _differ_only_by_datum(cands):
-            note = "; ".join(x for x in (f"{len(cands)} {family} measures differ only by datum (unit_name), each matched", id_note) if x)
+        elif _variant_kind(cands):
+            kind = _variant_kind(cands)
+            what = "datum (unit_name)" if kind == "datum" else "value type (register_value_type)"
+            note = "; ".join(x for x in (f"{len(cands)} {family} measures differ only by {what}, each matched", id_note) if x)
             for c in cands.to_dict("records"):
                 add(row, "matched", note, c)
         else:
@@ -444,16 +484,16 @@ def fallback_external_id(rows: pd.DataFrame, mapping: pd.DataFrame, scope: pd.Da
         scope = scope[~scope[kcol].map(lambda v: (clean(v) or "").lower() in _FALSE_WORDS)]
     ext = {}
     for f, e in zip(scope[fcol], scope[ecol]):
-        if clean(f) and clean(e) and clean(f) not in ext:
-            ext[clean(f)] = clean(e)
+        if id_key(f) and clean(e) and id_key(f) not in ext:
+            ext[id_key(f)] = clean(e)
     stuck = rows[rows["match_status"].isin(["no_station", "no_telemetry_id"])].drop_duplicates("id")
-    stuck = stuck[stuck["fffs_id"].map(lambda f: clean(f) in ext)]
-    stuck = stuck[[ext[clean(f)] != clean(t) for f, t in zip(stuck["fffs_id"], stuck["telemetry_id"])]]
+    stuck = stuck[stuck["fffs_id"].map(lambda f: id_key(f) in ext)]
+    stuck = stuck[[id_key(ext[id_key(f)]) != id_key(t) for f, t in zip(stuck["fffs_id"], stuck["telemetry_id"])]]
     if stuck.empty:
         return rows, 0
     sub = mapping[mapping["id"].isin(stuck["id"])].copy()
     original = dict(zip(sub["id"], sub["telemetry_id"]))
-    sub["telemetry_id"] = [ext[clean(f)] for f in sub["fffs_id"]]
+    sub["telemetry_id"] = [ext[id_key(f)] for f in sub["fffs_id"]]
     retried, _ = match_mapping(sub, register)
     retried = retried[retried["match_status"].isin(["matched", "ambiguous"])].copy()
     if retried.empty:
@@ -489,10 +529,10 @@ def add_import_only_rows(rows: pd.DataFrame, mapping: pd.DataFrame, scope: pd.Da
     qcol = next((c for k, c in norm.items() if "qualifier" in k), None)
     if not fcol or not ecol or not kcol:
         return rows, 0
-    have_f = {clean(v) for v in mapping["fffs_id"]} - {None}
-    have_t = {clean(v) for v in mapping["telemetry_id"]} - {None}
+    have_f = {id_key(v) for v in mapping["fffs_id"]} - {None}
+    have_t = {id_key(v) for v in mapping["telemetry_id"]} - {None}
     sc = scope[scope[kcol].map(lambda v: (clean(v) or "").lower() in _TRUE_WORDS)]
-    sc = sc[sc[fcol].map(lambda v: bool(clean(v)) and clean(v) not in have_f) & sc[ecol].map(lambda v: bool(clean(v)) and clean(v) not in have_t)]
+    sc = sc[sc[fcol].map(lambda v: bool(id_key(v)) and id_key(v) not in have_f) & sc[ecol].map(lambda v: bool(id_key(v)) and id_key(v) not in have_t)]
     sc = sc.drop_duplicates(subset=[fcol, ecol] + ([pcol] if pcol else []))
     if sc.empty:
         return rows, 0

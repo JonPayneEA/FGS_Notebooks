@@ -28,7 +28,7 @@ from difflib import SequenceMatcher
 
 import pandas as pd
 
-from utils.telemetry_mapping import family_of_text, clean
+from utils.telemetry_mapping import family_of_text, clean, id_key
 
 # Routes, best first. A row's best route is the earliest in this list that found a station.
 ROUTES = ["RLOIid", "notation", "wiskiID", "wiskiID = TelemetryID", "same after tidy-up", "similar name"]
@@ -183,12 +183,17 @@ def classify_ambiguity(rows: pd.DataFrame) -> pd.DataFrame:
     for rid, g in amb.groupby("id"):
         quals = {(q or "").lower() for q in g["register_qualifier"]}
         periods = {p for p in g["period"] if p}
+        units = {(u or "").lower() for u in g["unit_name"]} if "unit_name" in g else set()
+        vtypes = {(v or "").lower() for v in g["register_value_type"]} if "register_value_type" in g else set()
         if len(quals) == 1 and len(periods) > 1:
             why = "same qualifier, different period"
         elif len(quals) > 1 and len(periods) <= 1:
             why = "different qualifiers, same period"
         elif len(quals) > 1 and len(periods) > 1:
             why = "different qualifiers and periods"
+        elif len(units) > 1 or len(vtypes) > 1:
+            why = "same qualifier and period; differ by " + " and ".join(
+                p for p, n in (("unit (datum)", len(units)), ("value type", len(vtypes))) if n > 1)
         else:
             why = "identical qualifier and period (duplicate measures)"
         nums = pd.to_numeric(pd.Series(list(g["period"])), errors="coerce")
@@ -196,9 +201,10 @@ def classify_ambiguity(rows: pd.DataFrame) -> pd.DataFrame:
         out.append({"id": rid, "telemetry_id": g["telemetry_id"].iloc[0], "telemetry_parameter": g["telemetry_parameter"].iloc[0],
                     "parameter_qualifier": g["parameter_qualifier"].iloc[0], "candidates": len(g), "why": why,
                     "qualifiers": " | ".join(sorted(q for q in {x or "" for x in g["register_qualifier"]})),
-                    "periods": " | ".join(sorted(periods)), "settled_by_shortest_period": len(shortest) == 1})
+                    "periods": " | ".join(sorted(periods)), "settled_by_shortest_period": len(shortest) == 1,
+                    "units": " | ".join(sorted(units)), "value_types": " | ".join(sorted(vtypes))})
     return pd.DataFrame(out, columns=["id", "telemetry_id", "telemetry_parameter", "parameter_qualifier", "candidates", "why",
-                                      "qualifiers", "periods", "settled_by_shortest_period"])
+                                      "qualifiers", "periods", "settled_by_shortest_period", "units", "value_types"])
 
 
 _STAGE_PAIR = {"stage", "downstream stage"}
@@ -374,15 +380,15 @@ def keep_true_status(scope: pd.DataFrame, rows: pd.DataFrame) -> pd.DataFrame:
     ecol = norm.get("externalid")
     keep = scope[scope[kcol].map(lambda v: (clean(v) or "").lower() in _TRUE_WORDS)]
     by_fffs, by_tel = {}, {}
-    for rec in rows.to_dict("records"):
-        if clean(rec.get("fffs_id")):
-            by_fffs.setdefault(clean(rec["fffs_id"]), []).append(rec)
-        if clean(rec.get("telemetry_id")):
-            by_tel.setdefault(clean(rec["telemetry_id"]), []).append(rec)
+    for rec in rows.to_dict("records"):          # joined on id_key: Excel drops leading zeros in some files and not others
+        if id_key(rec.get("fffs_id")):
+            by_fffs.setdefault(id_key(rec["fffs_id"]), []).append(rec)
+        if id_key(rec.get("telemetry_id")):
+            by_tel.setdefault(id_key(rec["telemetry_id"]), []).append(rec)
     out = []
     for r in keep.to_dict("records"):
         fid, eid = clean(r.get(fcol)), (clean(r.get(ecol)) if ecol else None)
-        lines = by_fffs.get(fid) or (by_tel.get(eid) if eid else None) or []
+        lines = by_fffs.get(id_key(fid)) or (by_tel.get(id_key(eid)) if eid else None) or []
         line = {"FFFS_ID": fid}
         for key in ("parameter", "externalid", "externalparameter", "importsource"):
             if norm.get(key):

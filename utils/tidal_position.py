@@ -108,6 +108,15 @@ def position_candidates(rows: pd.DataFrame, stations: pd.DataFrame, max_km: floa
     return df.sort_values(["id", "distance_km"]).reset_index(drop=True) if len(df) else df
 
 
+def _same_gauge_in_other_datums(m: pd.DataFrame) -> bool:
+    """True when the measures share the qualifier, period and value type and differ in unit_name (m, mAOD ...)."""
+    units = [(clean(v) or "").lower() for v in m["unit_name"]]
+    same = (m["qualifier"].map(lambda v: (clean(v) or "").lower()).nunique() == 1
+            and m["period"].map(lambda v: clean(v) or "").nunique() == 1
+            and (m["value_type"].map(lambda v: (clean(v) or "").lower()).nunique() == 1 if "value_type" in m else True))
+    return same and all(units) and len(set(units)) == len(units)
+
+
 def apply_position_matches(rows: pd.DataFrame, candidates: pd.DataFrame, register: pd.DataFrame,
                            evidence: str = "name and position", prefer_value_type: str = "instantaneous") -> pd.DataFrame:
     """
@@ -142,12 +151,18 @@ def apply_position_matches(rows: pd.DataFrame, candidates: pd.DataFrame, registe
         best = g.sort_values("distance_km").iloc[0]
         how = f"matched by name and position (tide gauge code; {best['candidate_label']}, {best['distance_km']} km)"
         status = "matched" if len(m) == 1 else "ambiguous"
+        note_extra = ""
+        if len(m) > 1 and _same_gauge_in_other_datums(m):
+            # One gauge can be listed as two stations, one in a local datum (m) and one in mAOD. Each is the gauge in its
+            # own datum, so each is matched and unit_name tells them apart.
+            status, note_extra = "matched", f"{len(m)} tidal level measures differ only by datum (unit_name), each matched; "
         for rec in m.to_dict("records"):
             line = dict(base)
             line.update({"match_status": status, "measure_uri": rec["measure_uri"], "station_reference": rec["station_reference"],
                          "station_label": rec.get("station_label"), "register_parameter": rec["parameter"],
                          "register_qualifier": rec["qualifier"], "period": rec.get("period"), "unit_name": rec.get("unit_name"),
-                         "match_note": how if status == "matched" else f"{len(m)} tidal level measures fit; {how}"})
+                         "register_value_type": rec.get("value_type"),
+                         "match_note": (note_extra + how) if status == "matched" else f"{len(m)} tidal level measures fit; {how}"})
             out.append(line)
     if not handled:
         return rows

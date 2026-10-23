@@ -58,7 +58,7 @@ def register(rows):
 def mapping_rows(ids_names):
     return pd.DataFrame([{"id": i, "telemetry_id": t, "fffs_location_name": n, "match_status": "no_station", "match_note": "no measure in the register has this station reference",
                           "measure_uri": None, "station_reference": None, "station_label": None, "register_parameter": None,
-                          "register_qualifier": None, "period": None, "unit_name": None} for i, t, n in ids_names])
+                          "register_qualifier": None, "period": None, "unit_name": None, "register_value_type": None} for i, t, n in ids_names])
 
 
 def test_a_match_needs_name_and_position_and_takes_only_tidal_level_measures():
@@ -93,3 +93,16 @@ def test_only_instantaneous_measures_are_taken_when_the_register_gives_the_type(
                       ("m2", "E71139", "Immingham", "level", "Tidal Level", "mean", "900", "mAOD")])
     out = apply_position_matches(rows, position_candidates(rows, STATIONS), mixed)
     assert list(out["measure_uri"]) == ["m1"] and list(out["match_status"]) == ["matched"]
+
+
+def test_one_gauge_listed_as_two_stations_in_two_datums_is_matched_in_each():
+    rows = mapping_rows([("a", "5338N011W", "Immingham")])
+    reg = register([("m1", "E71139", "Immingham", "level", "Tidal Level", "instantaneous", "900", "mAOD"),
+                    ("m2", "E71124", "Immingham", "level", "Tidal Level", "instantaneous", "900", "m")])
+    out = apply_position_matches(rows, position_candidates(rows, STATIONS), reg)
+    assert list(out["match_status"]) == ["matched", "matched"] and set(out["unit_name"]) == {"mAOD", "m"}
+    assert "differ only by datum" in out.iloc[0]["match_note"] and set(out["register_value_type"]) == {"instantaneous"}
+    # A different period is a real ambiguity.
+    reg2 = register([("m1", "E71139", "Immingham", "level", "Tidal Level", "instantaneous", "900", "mAOD"),
+                     ("m2", "E71124", "Immingham", "level", "Tidal Level", "instantaneous", "300", "m")])
+    assert set(apply_position_matches(rows, position_candidates(rows, STATIONS), reg2)["match_status"]) == {"ambiguous"}
