@@ -1268,11 +1268,14 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
     unmatched; where the register gives no value type at all, the tidal measures are all kept. The note says "matched by name and position" with the station
     and distance. Position alone (the wrong name) is shown in the explore notebook and never matched. The
     `match_tidal_by_position` widget switches it off. The logic is in `utils/tidal_position.py`.
-  - **Setting aside sites outside the feed.** Welsh sites, among others, are not in the real-time
-    feed and can never match, which swamps the counts of what is missing. The `out_of_scope_csv`
-    widget takes a CSV with an `FFFS_ID` and/or `TelemetryID` column and an optional `Reason`
-    column. Rows on it that matched nothing get the status `out_of_scope` with the reason as their
-    note; a listed row that did match stays matched, with a note. A list can come from filtering the
+  - **Leaving rows out.** NRW sources and astronomical tide predictions are not in the real-time feed or
+    not wanted, which swamps the counts of what is missing. The `out_of_scope_csv` widget (default
+    `config.OUT_OF_SCOPE_CSV`, `Import_Timeseries.csv` in the external volume; if it is not there the
+    notebook says so and carries on) takes a CSV with an `FFFS_ID` and/or `TelemetryID` column and a
+    `Keep` column. A row with `Keep = FALSE` gets the status `out_of_scope` even if it matched a measure,
+    and its link is removed; `TRUE` or blank leaves the row alone. The note is the `Reason` column, or
+    `Keep = FALSE (ImportSource)`. Without a `Keep` column, a listed row that matched nothing is set aside
+    and one that matched stays matched, with a note. A list can come from filtering the
     Incident Management Reference Database export to Wales.
   - **Finding out why rows did not match.** `explore/Explore_telemetry_mapping` is a read-only
     notebook. Run it after 16. It shows the rows by status, the matches whose gauge name and

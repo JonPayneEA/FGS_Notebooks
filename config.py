@@ -168,6 +168,8 @@ EXTERNAL_VOLUME  = "shared_external_volume"
 WISKI_LOOKUP_CSV = f"/Volumes/{CATALOG}/{SCHEMA}/{EXTERNAL_VOLUME}/realTime_WISKI_lookup.csv"   # retired: 16 no longer reads it
 WISKI_MAPPING_CSV = f"/Volumes/{CATALOG}/{SCHEMA}/{EXTERNAL_VOLUME}/WISKI_Mapping.csv"          # TelemetryID, FFFS_ID, WISKI_ID and the parameter each row is for
 THRESHOLDS_CSV   = f"/Volumes/{CATALOG}/{RESTRICTED_SCHEMA}/{EXTERNAL_VOLUME}/thresholds_Feb.csv"
+# Mapping rows to leave out (NRW and astronomical tide sources): FFFS_ID and Keep columns, Keep = FALSE leaves a row out.
+OUT_OF_SCOPE_CSV = f"/Volumes/{CATALOG}/{SCHEMA}/{EXTERNAL_VOLUME}/Import_Timeseries.csv"
 
 # -----------------------------------------------------------------------------
 # EA REAL-TIME LIVE READINGS (job 23)

@@ -223,3 +223,24 @@ def test_a_supplied_list_sets_unmatched_sites_aside_and_keeps_real_matches():
         assert False
     except ValueError as e:
         assert "FFFS_ID or TelemetryID" in str(e)
+
+
+def test_a_keep_column_removes_the_rows_marked_false_even_if_they_matched():
+    reg = register([("m/1", "S1", "level", "Stage", "900")])
+    rows, _ = match_mapping(mapping([("a", "N1", "Welsh astro", "H.obs", "S1", "Water Level", None, "1"),     # matched, Keep FALSE
+                                     ("b", "N2", "Welsh unmatched", "H.obs", "NOPE", "Water Level", None, "2"),
+                                     ("c", "E1", "English", "H.obs", "S1", "Water Level", None, "3"),          # Keep TRUE
+                                     ("d", "E2", "Not on the list", "H.obs", "NOPE2", "Water Level", None, "4")]), reg)
+    scope = pd.DataFrame({"FFFS_ID": ["N1", "N2", "E1", None], "ParameterQualifier": ["x"] * 4,
+                          "ImportSource": ["Astro", "Astro", "Telemetry", "Astro"], "Keep": ["FALSE", "false", "TRUE", ""]})
+    out = flag_out_of_scope(rows, scope).set_index("id")
+    assert out.loc["a", "match_status"] == "out_of_scope" and pd.isna(out.loc["a", "measure_uri"])    # the link is removed
+    assert out.loc["a", "match_note"] == "Keep = FALSE (Astro)"
+    assert out.loc["b", "match_status"] == "out_of_scope"
+    assert out.loc["c", "match_status"] == "matched" and out.loc["c", "match_note"] == ""             # Keep TRUE: left alone
+    assert out.loc["d", "match_status"] == "no_station"
+    # Without a Keep column the old rule holds: a real match stays.
+    plain = flag_out_of_scope(rows, pd.DataFrame({"FFFS_ID": ["N1"], "Reason": ["Wales"]})).set_index("id")
+    assert plain.loc["a", "match_status"] == "matched" and "out of scope" in plain.loc["a", "match_note"]
+    # Every Keep is TRUE: nothing is set aside.
+    assert flag_out_of_scope(rows, pd.DataFrame({"FFFS_ID": ["N1"], "Keep": ["TRUE"]})).equals(rows)
