@@ -1160,6 +1160,7 @@ ones. See "History is an archive" above.
 │   ├── 24_backfill_mp_briefing_drafts Drafts for earlier statements, to review after the event (manual)
 │   ├── 25_warning_history_periods     Start, end and duration of every alert and warning, from the message history (manual)
 │   ├── 26_warning_fgs_coverage        Whether each alert and warning was under an FGS polygon, and when
+│   ├── 27_fw_timing_validation        Was each flood warning issued before the RES threshold was crossed, by the target lead time (restricted)
 │   ├── 12_ea_area_boundaries_download EA administrative boundaries (manual)
 │   ├── 15_rt_station_measure_register All EA stations and measures (manual)
 │   ├── 16_build_wiski_lookup          Telemetry mapping matched to measures: gauge names, FFFS and WISKI ids (manual)
@@ -1175,6 +1176,29 @@ ones. See "History is an archive" above.
     ├── databricks_workflows.yml       Workflow definitions (optional)
     └── scheduling_guide.md            Notebook scheduler instructions
 ```
+
+## Flood warning timing validation: `jobs/27_fw_timing_validation`
+
+Runs in the restricted deployment, because it reads the thresholds. It checks whether each flood warning was issued in time.
+A gauge has an **FW** threshold, which triggers a flood warning, and a higher **RES** threshold, the level at which the
+impact is reached. The warning must be out before the reading first crosses RES, by at least the gauge's target lead time
+(hours, a column of the thresholds table).
+
+- **Links.** Thresholds to gauge by `FFFS_ID` (case and leading zeros ignored) and the parameter's family. Gauge to readings
+  through the matched lines of `ea_rt_telemetry_mapping`; where a gauge has several measures the instantaneous one with the
+  most readings is used. Gauge to warning through the threshold row's warning area code and the flood-warning-level periods of
+  `ea_warning_periods` (a flood alert does not count).
+- **Outcomes**, for each upward crossing of RES: `on time`, `too short` (issued before, but by less than the target), `late`
+  (a warning was issued within `late_hours` after it) or `missed`. For a warning with no crossing while it was in force:
+  `RES not reached`, or `no readings`. Each also has `trigger_time` (the FW threshold crossing before it) and
+  `issue_delay_hours` (how long the warning took after the trigger). A crossing counts once until the readings have stayed
+  below the threshold for `reset_hours`.
+- **The thresholds table's columns are not fixed.** Leave the column widgets blank to find them by their usual names, or name
+  them; the notebook prints what it found and the values of the type column. It needs an FFFS_ID, a type and a value, and
+  wants a parameter, a target lead time and a warning area code. `fw_label` and `res_label` say how the type column names
+  the two thresholds.
+- **Output.** `ea_fw_timing_validation` in the restricted schema, overwritten in full, with a summary printed (rows and median
+  lead time per outcome). The logic is in `utils/fw_timing.py`.
 
 ## Exploring the readings: `explore/Explore_live_readings`
 
