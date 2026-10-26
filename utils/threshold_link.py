@@ -18,7 +18,7 @@
 #   2. Parameter's family: H is level, Q is flow, and so on (family_of_code), against the measure's family.
 # Then the UNIT must agree. The threshold's Unit (mALD) is compared with the measure's unit_name, which for a
 # level is its datum (mAOD, mASD, mALD ...). The two are compared after case and spacing are ignored, and
-# through an alias table for spellings that differ. A bare "m" (no datum named) is taken as mALD by default, only when
+# through an alias table for spellings that differ. A bare "m" (no datum named) is taken as mALD or mASD by default, only when
 # the gauge has no measure in exactly the threshold's unit; unit_match says exact or alias. A measure whose unit does not agree is never linked: the
 # row says unit_mismatch and names the units the gauge does have, so the alias table can be filled in
 # from the profile rather than guessed.
@@ -146,9 +146,9 @@ def prepare_thresholds(raw: pd.DataFrame, columns: dict = None, basis_label: str
 
 
 # Units that are taken to mean the same without being told. The register often gives a level in plain "m" with no datum named,
-# where the thresholds say mALD. A bare "m" is only a fallback: a measure whose unit is exactly the threshold's is always preferred,
+# where the thresholds say mALD or mASD. A bare "m" is only a fallback: a measure whose unit is exactly the threshold's is always preferred,
 # and a link made through an alias says so (unit_match = alias).
-DEFAULT_ALIASES = {"mald": {"m"}, "m": {"mald"}}
+DEFAULT_ALIASES = {"mald": {"m"}, "masd": {"m"}, "m": {"mald", "masd"}}
 
 
 def prepare_aliases(aliases: pd.DataFrame = None) -> dict:

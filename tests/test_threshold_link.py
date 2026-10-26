@@ -104,3 +104,13 @@ def test_a_bare_m_is_taken_as_mald_only_when_no_measure_is_exactly_mald():
     assert link_thresholds(thr, mapping()).set_index("threshold_id").loc["a1", "unit_match"] == "exact"
     mp2 = mapping(); mp2.loc[mp2["fffs_id"] == "0130TH", "unit_name"] = "mASD"
     assert link_thresholds(thr, mp2).set_index("threshold_id").loc["a1", "link_status"] == "unit_mismatch"   # other datums are still not guessed
+
+
+def test_a_bare_m_also_stands_for_masd_but_never_for_maod():
+    raw = raw_file(); raw.loc[raw["ID"] == "a1", "Unit"] = "mASD"
+    thr, _ = prepare_thresholds(raw)
+    mp = mapping(); mp.loc[mp["fffs_id"] == "0130TH", "unit_name"] = "m"
+    out = link_thresholds(thr, mp).set_index("threshold_id")
+    assert out.loc["a1", "link_status"] == "linked" and out.loc["a1", "unit_match"] == "alias"
+    mp2 = mapping(); mp2.loc[mp2["fffs_id"] == "0144TH", "unit_name"] = "m"          # a3 is mAOD: a bare m is not assumed to be that
+    assert link_thresholds(thr, mp2).set_index("threshold_id").loc["a3", "link_status"] == "unit_mismatch"

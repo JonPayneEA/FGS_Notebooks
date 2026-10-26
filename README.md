@@ -1382,7 +1382,7 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
   match the measure's, and the threshold's Unit (mALD, mAOD ...) must agree with the measure's unit_name, because a
   level is only comparable on the same datum. A measure whose unit disagrees is never linked: the row says
   `unit_mismatch` and names the units the gauge has. The notebook prints the units and parameters of the rows kept
-  first. A bare `m` on a measure is taken as `mALD` when the gauge has no measure in exactly mALD (the row says
+  first. A bare `m` on a measure is taken as `mALD` or `mASD` when the gauge has no measure in exactly the threshold's unit (the row says
   `unit_match = alias`); if two sources word one unit differently, list the pair in `Thresholds/unit_aliases.csv`
   (`threshold_unit`, `measure_unit`) and re-run. Every Type (ACTCON, RES) and Purpose is kept as a column. Status per row:
   `linked`, `linked_chosen` (several measures agree; the instantaneous one with most readings), `unit_mismatch`,
