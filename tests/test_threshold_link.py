@@ -88,3 +88,19 @@ def test_several_agreeing_measures_choose_instantaneous_then_most_readings():
 
 def test_unit_key_ignores_case_and_spacing():
     assert unit_key(" m ALD ") == "mald" and unit_key(None) is None and unit_key("nan") is None
+
+
+def test_a_bare_m_is_taken_as_mald_only_when_no_measure_is_exactly_mald():
+    thr, _ = prepare_thresholds(raw_file())
+    mp = mapping()
+    mp.loc[mp["fffs_id"] == "0130TH", "unit_name"] = "m"
+    out = link_thresholds(thr, mp).set_index("threshold_id")
+    assert out.loc["a1", "link_status"] == "linked" and out.loc["a1", "measure_uri"] == "u1" and out.loc["a1", "unit_match"] == "alias"
+    assert "taken as" in out.loc["a1", "link_note"]
+    both = pd.concat([mp, pd.DataFrame({"fffs_id": ["0130TH"], "telemetry_family": ["level"], "code_family": ["level"], "measure_uri": ["u_exact"],
+                                        "unit_name": ["mALD"], "register_value_type": ["instantaneous"], "n_readings": [1]})], ignore_index=True)
+    out2 = link_thresholds(thr, both).set_index("threshold_id")
+    assert out2.loc["a1", "measure_uri"] == "u_exact" and out2.loc["a1", "unit_match"] == "exact"     # exact beats the alias
+    assert link_thresholds(thr, mapping()).set_index("threshold_id").loc["a1", "unit_match"] == "exact"
+    mp2 = mapping(); mp2.loc[mp2["fffs_id"] == "0130TH", "unit_name"] = "mASD"
+    assert link_thresholds(thr, mp2).set_index("threshold_id").loc["a1", "link_status"] == "unit_mismatch"   # other datums are still not guessed
