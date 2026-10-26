@@ -50,6 +50,7 @@ COLUMN_GUESSES = {
     "lead": ["targetleadtimeminutes", "targetleadtime"],
     "target_area": ["targetareaid", "targetarea"],
     "category": ["category", "cat"],
+    "season": ["season"],
     "id": ["id", "thresholdid"],
     "name": ["fffslocname", "locationname"],
 }
@@ -125,6 +126,7 @@ def prepare_thresholds(raw: pd.DataFrame, columns: dict = None, basis_label: str
     df["type"] = col("type").map(clean).values
     df["purpose"] = col("purpose").map(clean).values
     df["category"] = col("category").map(clean).values
+    df["season"] = col("season").map(clean).values
     df["target_lead_minutes"] = pd.to_numeric(col("lead"), errors="coerce").values
     df["target_area"] = col("target_area").map(clean).values
     keep = (basis.str.lower() == basis_label.strip().lower()).fillna(False) & (catdesc.str.lower() == catdesc_label.strip().lower()).fillna(False)

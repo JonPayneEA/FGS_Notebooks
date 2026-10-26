@@ -162,6 +162,7 @@ TBL_FGS_EXPOSURE        = f"{CATALOG}.{SCHEMA}.fgs_constituency_exposure"
 TBL_WARNING_FGS_COVERAGE = f"{CATALOG}.{SCHEMA}.ea_warning_fgs_coverage"   # job 26: each warning, and whether and when an FGS polygon covered it
 TBL_PIPELINE_HEALTH     = f"{CATALOG}.{SCHEMA}.pipeline_health"
 TBL_EA_THRESHOLDS       = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_thresholds_all"
+TBL_FW_TIMING           = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_fw_timing_validation"   # job 27: each RES crossing against the warning in force
 TBL_FW_THRESHOLD_LINKS  = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_fw_threshold_gauge_links"   # job 28: Observed flood warning thresholds linked to gauge measures
 
 # Externally supplied CSVs, read from Unity Catalog volumes by notebooks 16 and 17.
