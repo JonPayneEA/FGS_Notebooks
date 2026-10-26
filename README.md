@@ -1378,7 +1378,7 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
   with unrestricted outputs. The file is `Thresholds/2026_02_01_EA_Thresholds.csv` in the restricted
   volume; every column is read as text.
 - **28** links the Observed thresholds whose CatDesc is Flood Warning to the gauges the real-time import holds.
-  Location is the FFFS_ID (case and leading zeros ignored). The Parameter's family (H is level, Q is flow) must
+  Location is the FFFS_ID (case and leading zeros ignored), looked up in the matched rows of `ea_rt_telemetry_mapping` (the rows `ea_rt_measures_mapped` is built from; ambiguous candidates are not used). The Parameter's family (H is level, Q is flow) must
   match the measure's, and the threshold's Unit (mALD, mAOD ...) must agree with the measure's unit_name, because a
   level is only comparable on the same datum. A measure whose unit disagrees is never linked: the row says
   `unit_mismatch` and names the units the gauge has. The notebook prints the units and parameters of the rows kept
