@@ -95,3 +95,10 @@ def test_the_summary_counts_outcomes_and_their_share_of_res_events():
                       "lead_hours": [8.0, 4.0, float("nan"), float("nan")]})
     s = summarise(r).set_index("outcome")
     assert s.loc["on time", "rows"] == 2 and s.loc["on time", "median_lead_hours"] == 6.0 and abs(s.loc["on time", "share_of_res_events"] - 0.667) < 0.001
+
+
+def test_the_converted_value_is_the_one_used():
+    links = pd.DataFrame([link_row("130TH", "RES", "FW", "88.6", "A")])
+    links["value_in_measure_unit"] = "1.6"
+    assert gauges_from_links(links).iloc[0]["res_value"] == 1.6
+    assert gauges_from_links(links.drop(columns=["value_in_measure_unit"])).iloc[0]["res_value"] == 88.6

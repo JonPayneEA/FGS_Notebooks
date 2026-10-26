@@ -19,7 +19,7 @@
 # Then the UNIT must agree. The threshold's Unit (mALD) is compared with the measure's unit_name, which for a
 # level is its datum (mAOD, mASD, mALD ...). The two are compared after case and spacing are ignored, and
 # through an alias table for spellings that differ. A bare "m" (no datum named) is taken as mALD, mASD or mAOD by default, only when
-# the gauge has no measure in exactly the threshold's unit; unit_match says exact, datum_assumed (mALD and mASD taken as one) or alias (a bare m). A measure whose unit does not agree is never linked: the
+# the gauge has no measure in exactly the threshold's unit; unit_match says exact, datum_assumed (mALD and mASD taken as one), alias (a bare m) or converted (the value moved between mAOD and a local datum with z, see value_in_measure_unit). A measure whose unit does not agree is never linked: the
 # row says unit_mismatch and names the units the gauge does have, so the alias table can be filled in
 # from the profile rather than guessed.
 #
@@ -52,6 +52,7 @@ COLUMN_GUESSES = {
     "target_area": ["targetareaid", "targetarea"],
     "category": ["category", "cat"],
     "season": ["season"],
+    "z": ["z", "gaugezero", "zero"],
     "id": ["id", "thresholdid"],
     "name": ["fffslocname", "locationname"],
 }
@@ -128,6 +129,7 @@ def prepare_thresholds(raw: pd.DataFrame, columns: dict = None, basis_label: str
     df["purpose"] = col("purpose").map(clean).values
     df["category"] = col("category").map(clean).values
     df["season"] = col("season").map(clean).values
+    df["z"] = pd.to_numeric(col("z"), errors="coerce").values
     df["target_lead_minutes"] = pd.to_numeric(col("lead"), errors="coerce").values
     df["target_area"] = col("target_area").map(clean).values
     keep = (basis.str.lower() == basis_label.strip().lower()).fillna(False) & (catdesc.str.lower() == catdesc_label.strip().lower()).fillna(False)
@@ -187,6 +189,23 @@ def _order(cands: pd.DataFrame) -> pd.DataFrame:
     return cands.assign(_inst=inst, _n=n).sort_values(["_inst", "_n", "measure_uri"], ascending=[True, False, True])
 
 
+# A threshold in one datum can be moved to the measure's datum with the gauge zero z (metres AOD of the gauge's zero), taking
+# mALD and mASD as one local datum (see DATUM_EQUIVALENTS). mAOD threshold to a local measure: value minus z. Local threshold to an
+# mAOD measure: value plus z. Only when z is a number, only when no measure agrees on unit, and flagged unit_match = converted.
+_LOCAL = {"mald", "masd"}
+
+
+def _conversion(threshold_unit_key, measure_unit_key, z):
+    """The amount to add to the threshold value to put it in the measure's datum, or None when no conversion applies."""
+    if z is None or pd.isna(z):
+        return None
+    if threshold_unit_key == "maod" and measure_unit_key in _LOCAL:
+        return -float(z)
+    if threshold_unit_key in _LOCAL and measure_unit_key == "maod":
+        return float(z)
+    return None
+
+
 _MEASURE_COLS = ["measure_uri", "station_reference", "station_label", "register_parameter", "register_qualifier", "period",
                  "unit_name", "register_value_type", "n_readings", "first_reading", "last_reading"]
 
@@ -215,6 +234,8 @@ def link_thresholds(thr: pd.DataFrame, mapping: pd.DataFrame, aliases: dict = No
         out.update({c: None for c in _MEASURE_COLS})
         out["n_candidates"] = 0
         out["unit_match"] = None
+        out["value_in_measure_unit"] = t.get("value")
+        out["z_used"] = None
         g = by_key.get(t["key"])
         if not t.get("family"):
             status, note = "no_family", f"Parameter {t.get('parameter')} names no family"
@@ -236,9 +257,17 @@ def link_thresholds(thr: pd.DataFrame, mapping: pd.DataFrame, aliases: dict = No
                             agree, match_kind = agree[kind == rank], rank
                             break
                 via_alias = match_kind != "exact"
+                convert = None
+                if agree.empty:
+                    tk_ = unit_key(t.get("unit"))
+                    conv = cands[[_conversion(tk_, unit_key(u), t.get("z")) is not None for u in cands["unit_name"]]]
+                    if len(conv):
+                        agree, match_kind, via_alias = conv, "converted", True
+                        convert = _conversion(tk_, unit_key(_order(conv).iloc[0]["unit_name"]), t.get("z"))
                 if agree.empty:
                     have = sorted({clean(u) or "(no unit)" for u in cands["unit_name"]})
-                    status, note = "unit_mismatch", f"threshold unit {t.get('unit')}; the gauge's {t['family']} measures are in {', '.join(have)}"
+                    why = "; no z to convert with" if (unit_key(t.get("unit")) in ({"maod"} | _LOCAL) and pd.isna(t.get("z"))) else ""
+                    status, note = "unit_mismatch", f"threshold unit {t.get('unit')}; the gauge's {t['family']} measures are in {', '.join(have)}{why}"
                 else:
                     best = _order(agree)
                     out.update({c: best.iloc[0][c] for c in _MEASURE_COLS})
@@ -246,12 +275,17 @@ def link_thresholds(thr: pd.DataFrame, mapping: pd.DataFrame, aliases: dict = No
                     one = len(agree) == 1
                     status = "linked" if one else "linked_chosen"
                     note = "" if one else f"{len(agree)} measures agree on unit; chose the instantaneous one with the most readings"
-                    if via_alias:
+                    if convert is not None:
+                        out["value_in_measure_unit"] = round(float(t["value"]) + convert, 4)
+                        out["z_used"] = t.get("z")
+                        note = (note + "; " if note else "") + (f"threshold {t.get('unit')} {t['value']} converted to {clean(best.iloc[0]['unit_name'])} "
+                                                                f"{out['value_in_measure_unit']} with z {t.get('z')}")
+                    elif via_alias:
                         note = (note + "; " if note else "") + f"measure unit {clean(best.iloc[0]['unit_name'])} taken as the threshold's {t.get('unit')}"
                     out["unit_match"] = match_kind
         out["link_status"], out["link_note"] = status, note
         rows.append(out)
-    cols = list(thr.columns) + ["link_status", "link_note", "n_candidates", "unit_match"] + _MEASURE_COLS
+    cols = list(thr.columns) + ["link_status", "link_note", "n_candidates", "unit_match", "value_in_measure_unit", "z_used"] + _MEASURE_COLS
     return pd.DataFrame(rows, columns=cols)
 
 
