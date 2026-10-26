@@ -66,12 +66,12 @@ def test_link_needs_gauge_family_and_unit():
 def test_a_unit_that_disagrees_is_not_linked_and_says_why():
     thr, _ = prepare_thresholds(raw_file())
     mp = mapping()
-    mp.loc[mp["fffs_id"] == "0130TH", "unit_name"] = "mASD"
+    mp.loc[mp["fffs_id"] == "0130TH", "unit_name"] = "mBDAT"
     out = link_thresholds(thr, mp).set_index("threshold_id")
     assert out.loc["a1", "link_status"] == "unit_mismatch" and pd.isna(out.loc["a1", "measure_uri"])
-    assert "mASD" in out.loc["a1", "link_note"] and "mALD" in out.loc["a1", "link_note"]
+    assert "mBDAT" in out.loc["a1", "link_note"] and "mALD" in out.loc["a1", "link_note"]
     # an alias fills the gap
-    al = prepare_aliases(pd.DataFrame({"threshold_unit": ["mALD"], "measure_unit": ["mASD"]}))
+    al = prepare_aliases(pd.DataFrame({"threshold_unit": ["mALD"], "measure_unit": ["mBDAT"]}))
     out2 = link_thresholds(thr, mp, al).set_index("threshold_id")
     assert out2.loc["a1", "link_status"] == "linked" and out2.loc["a1", "measure_uri"] == "u1"
     assert link_summary(out.reset_index())["by_status"]["unit_mismatch"] == 1
@@ -102,5 +102,34 @@ def test_a_bare_m_is_taken_as_mald_only_when_no_measure_is_exactly_mald():
     out2 = link_thresholds(thr, both).set_index("threshold_id")
     assert out2.loc["a1", "measure_uri"] == "u_exact" and out2.loc["a1", "unit_match"] == "exact"     # exact beats the alias
     assert link_thresholds(thr, mapping()).set_index("threshold_id").loc["a1", "unit_match"] == "exact"
-    mp2 = mapping(); mp2.loc[mp2["fffs_id"] == "0130TH", "unit_name"] = "mASD"
+    mp2 = mapping(); mp2.loc[mp2["fffs_id"] == "0130TH", "unit_name"] = "mBDAT"
     assert link_thresholds(thr, mp2).set_index("threshold_id").loc["a1", "link_status"] == "unit_mismatch"   # other datums are still not guessed
+
+
+def test_a_bare_m_also_stands_for_masd_and_maod_but_only_as_a_fallback():
+    raw = raw_file(); raw.loc[raw["ID"] == "a1", "Unit"] = "mASD"
+    thr, _ = prepare_thresholds(raw)
+    mp = mapping(); mp.loc[mp["fffs_id"] == "0130TH", "unit_name"] = "m"
+    out = link_thresholds(thr, mp).set_index("threshold_id")
+    assert out.loc["a1", "link_status"] == "linked" and out.loc["a1", "unit_match"] == "alias"
+    mp2 = mapping(); mp2.loc[mp2["fffs_id"] == "0144TH", "unit_name"] = "m"          # a3 is mAOD: if mAOD does not match, try m
+    o2 = link_thresholds(thr, mp2).set_index("threshold_id")
+    assert o2.loc["a3", "link_status"] in ("linked", "linked_chosen") and o2.loc["a3", "unit_match"] == "alias" and o2.loc["a3", "measure_uri"] in ("u2", "u3")
+    mp3 = mapping(); mp3.loc[mp3["fffs_id"] == "0144TH", "unit_name"] = ["m", "mAOD"]   # an exact mAOD measure beats the bare m
+    o3 = link_thresholds(thr, mp3).set_index("threshold_id")
+    assert o3.loc["a3", "measure_uri"] == "u3" and o3.loc["a3", "unit_match"] == "exact"
+
+
+def test_mald_and_masd_are_one_datum_but_ranked_below_exact_and_above_bare_m():
+    thr, _ = prepare_thresholds(raw_file())
+    mp = mapping(); mp.loc[mp["fffs_id"] == "0130TH", "unit_name"] = "mASD"
+    out = link_thresholds(thr, mp).set_index("threshold_id")
+    assert out.loc["a1", "link_status"] == "linked" and out.loc["a1", "unit_match"] == "datum_assumed" and "taken as" in out.loc["a1", "link_note"]
+    extra = lambda uri, unit: pd.DataFrame({"fffs_id": ["0130TH"], "telemetry_family": ["level"], "code_family": ["level"], "measure_uri": [uri],   # noqa: E731
+                                            "unit_name": [unit], "register_value_type": ["instantaneous"], "n_readings": [1]})
+    with_m = link_thresholds(thr, pd.concat([mp, extra("u_m", "m")], ignore_index=True)).set_index("threshold_id")
+    assert with_m.loc["a1", "measure_uri"] == "u1" and with_m.loc["a1", "unit_match"] == "datum_assumed"          # beats the bare m
+    with_exact = link_thresholds(thr, pd.concat([mp, extra("u_ex", "mALD")], ignore_index=True)).set_index("threshold_id")
+    assert with_exact.loc["a1", "measure_uri"] == "u_ex" and with_exact.loc["a1", "unit_match"] == "exact"        # exact beats both
+    maod = mapping(); maod.loc[maod["fffs_id"] == "0130TH", "unit_name"] = "mAOD"
+    assert link_thresholds(thr, maod).set_index("threshold_id").loc["a1", "link_status"] == "unit_mismatch"       # mAOD is never taken for ALD
