@@ -162,12 +162,15 @@ TBL_FGS_EXPOSURE        = f"{CATALOG}.{SCHEMA}.fgs_constituency_exposure"
 TBL_WARNING_FGS_COVERAGE = f"{CATALOG}.{SCHEMA}.ea_warning_fgs_coverage"   # job 26: each warning, and whether and when an FGS polygon covered it
 TBL_PIPELINE_HEALTH     = f"{CATALOG}.{SCHEMA}.pipeline_health"
 TBL_EA_THRESHOLDS       = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_thresholds_all"
+TBL_FW_THRESHOLD_LINKS  = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_fw_threshold_gauge_links"   # job 28: Observed flood warning thresholds linked to gauge measures
 
 # Externally supplied CSVs, read from Unity Catalog volumes by notebooks 16 and 17.
 EXTERNAL_VOLUME  = "shared_external_volume"
 WISKI_LOOKUP_CSV = f"/Volumes/{CATALOG}/{SCHEMA}/{EXTERNAL_VOLUME}/realTime_WISKI_lookup.csv"   # retired: 16 no longer reads it
 WISKI_MAPPING_CSV = f"/Volumes/{CATALOG}/{SCHEMA}/{EXTERNAL_VOLUME}/WISKI_Mapping.csv"          # TelemetryID, FFFS_ID, WISKI_ID and the parameter each row is for
-THRESHOLDS_CSV   = f"/Volumes/{CATALOG}/{RESTRICTED_SCHEMA}/{EXTERNAL_VOLUME}/thresholds_Feb.csv"
+THRESHOLDS_CSV   = f"/Volumes/{CATALOG}/{RESTRICTED_SCHEMA}/{EXTERNAL_VOLUME}/Thresholds/2026_02_01_EA_Thresholds.csv"
+# Optional two-column CSV (threshold_unit, measure_unit) naming units that mean the same, read by 28 when a threshold unit is worded differently from the register's.
+THRESHOLD_UNIT_ALIASES_CSV = f"/Volumes/{CATALOG}/{RESTRICTED_SCHEMA}/{EXTERNAL_VOLUME}/Thresholds/unit_aliases.csv"
 # Mapping rows to leave out (NRW and astronomical tide sources): FFFS_ID and Keep columns, Keep = FALSE leaves a row out.
 OUT_OF_SCOPE_CSV = f"/Volumes/{CATALOG}/{SCHEMA}/{EXTERNAL_VOLUME}/Import_Timeseries.csv"
 
