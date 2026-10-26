@@ -19,7 +19,7 @@
 # Then the UNIT must agree. The threshold's Unit (mALD) is compared with the measure's unit_name, which for a
 # level is its datum (mAOD, mASD, mALD ...). The two are compared after case and spacing are ignored, and
 # through an alias table for spellings that differ. A bare "m" (no datum named) is taken as mALD, mASD or mAOD by default, only when
-# the gauge has no measure in exactly the threshold's unit; unit_match says exact or alias. A measure whose unit does not agree is never linked: the
+# the gauge has no measure in exactly the threshold's unit; unit_match says exact, datum_assumed (mALD and mASD taken as one) or alias (a bare m). A measure whose unit does not agree is never linked: the
 # row says unit_mismatch and names the units the gauge does have, so the alias table can be filled in
 # from the profile rather than guessed.
 #
@@ -148,7 +148,10 @@ def prepare_thresholds(raw: pd.DataFrame, columns: dict = None, basis_label: str
 # Units that are taken to mean the same without being told. The register often gives a level in plain "m" with no datum named,
 # where the thresholds say mALD, mASD or mAOD. A bare "m" is only a fallback: a measure whose unit is exactly the threshold's is always preferred,
 # and a link made through an alias says so (unit_match = alias).
-DEFAULT_ALIASES = {"mald": {"m"}, "masd": {"m"}, "maod": {"m"}, "m": {"mald", "masd", "maod"}}
+# mALD and mASD are taken as one datum (the user's decision for this data): they link with unit_match = datum_assumed, which ranks
+# below an exact match and above the bare-m fallback. mAOD is never taken for either.
+DATUM_EQUIVALENTS = {"mald": {"masd"}, "masd": {"mald"}}
+DEFAULT_ALIASES = {"mald": {"m", "masd"}, "masd": {"m", "mald"}, "maod": {"m"}, "m": {"mald", "masd", "maod"}}
 
 
 def prepare_aliases(aliases: pd.DataFrame = None) -> dict:
@@ -223,9 +226,16 @@ def link_thresholds(thr: pd.DataFrame, mapping: pd.DataFrame, aliases: dict = No
                 status, note = "no_measure", f"the gauge has no {t['family']} measure in the register"
             else:
                 agree = cands[[_unit_agrees(t.get("unit"), u, aliases) for u in cands["unit_name"]]]
-                exact = agree[[unit_key(u) == unit_key(t.get("unit")) for u in agree["unit_name"]]]
-                via_alias = exact.empty and not agree.empty
-                agree = exact if len(exact) else agree                                       # an exact unit beats an aliased one
+                tk = unit_key(t.get("unit"))
+                match_kind = "exact"
+                if not agree.empty:
+                    kind = pd.Series(["exact" if unit_key(u) == tk else "datum_assumed" if unit_key(u) in DATUM_EQUIVALENTS.get(tk, ()) else "alias"
+                                      for u in agree["unit_name"]], index=agree.index)
+                    for rank in ("exact", "datum_assumed", "alias"):                         # the best kind present wins
+                        if (kind == rank).any():
+                            agree, match_kind = agree[kind == rank], rank
+                            break
+                via_alias = match_kind != "exact"
                 if agree.empty:
                     have = sorted({clean(u) or "(no unit)" for u in cands["unit_name"]})
                     status, note = "unit_mismatch", f"threshold unit {t.get('unit')}; the gauge's {t['family']} measures are in {', '.join(have)}"
@@ -238,7 +248,7 @@ def link_thresholds(thr: pd.DataFrame, mapping: pd.DataFrame, aliases: dict = No
                     note = "" if one else f"{len(agree)} measures agree on unit; chose the instantaneous one with the most readings"
                     if via_alias:
                         note = (note + "; " if note else "") + f"measure unit {clean(best.iloc[0]['unit_name'])} taken as the threshold's {t.get('unit')}"
-                    out["unit_match"] = "alias" if via_alias else "exact"
+                    out["unit_match"] = match_kind
         out["link_status"], out["link_note"] = status, note
         rows.append(out)
     cols = list(thr.columns) + ["link_status", "link_note", "n_candidates", "unit_match"] + _MEASURE_COLS
