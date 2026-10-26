@@ -106,11 +106,15 @@ def test_a_bare_m_is_taken_as_mald_only_when_no_measure_is_exactly_mald():
     assert link_thresholds(thr, mp2).set_index("threshold_id").loc["a1", "link_status"] == "unit_mismatch"   # other datums are still not guessed
 
 
-def test_a_bare_m_also_stands_for_masd_but_never_for_maod():
+def test_a_bare_m_also_stands_for_masd_and_maod_but_only_as_a_fallback():
     raw = raw_file(); raw.loc[raw["ID"] == "a1", "Unit"] = "mASD"
     thr, _ = prepare_thresholds(raw)
     mp = mapping(); mp.loc[mp["fffs_id"] == "0130TH", "unit_name"] = "m"
     out = link_thresholds(thr, mp).set_index("threshold_id")
     assert out.loc["a1", "link_status"] == "linked" and out.loc["a1", "unit_match"] == "alias"
-    mp2 = mapping(); mp2.loc[mp2["fffs_id"] == "0144TH", "unit_name"] = "m"          # a3 is mAOD: a bare m is not assumed to be that
-    assert link_thresholds(thr, mp2).set_index("threshold_id").loc["a3", "link_status"] == "unit_mismatch"
+    mp2 = mapping(); mp2.loc[mp2["fffs_id"] == "0144TH", "unit_name"] = "m"          # a3 is mAOD: if mAOD does not match, try m
+    o2 = link_thresholds(thr, mp2).set_index("threshold_id")
+    assert o2.loc["a3", "link_status"] == "linked" and o2.loc["a3", "unit_match"] == "alias" and o2.loc["a3", "measure_uri"] in ("u2", "u3")
+    mp3 = mapping(); mp3.loc[mp3["fffs_id"] == "0144TH", "unit_name"] = ["m", "mAOD"]   # an exact mAOD measure beats the bare m
+    o3 = link_thresholds(thr, mp3).set_index("threshold_id")
+    assert o3.loc["a3", "measure_uri"] == "u3" and o3.loc["a3", "unit_match"] == "exact"
