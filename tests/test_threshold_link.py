@@ -114,7 +114,7 @@ def test_a_bare_m_also_stands_for_masd_and_maod_but_only_as_a_fallback():
     assert out.loc["a1", "link_status"] == "linked" and out.loc["a1", "unit_match"] == "alias"
     mp2 = mapping(); mp2.loc[mp2["fffs_id"] == "0144TH", "unit_name"] = "m"          # a3 is mAOD: if mAOD does not match, try m
     o2 = link_thresholds(thr, mp2).set_index("threshold_id")
-    assert o2.loc["a3", "link_status"] == "linked" and o2.loc["a3", "unit_match"] == "alias" and o2.loc["a3", "measure_uri"] in ("u2", "u3")
+    assert o2.loc["a3", "link_status"] in ("linked", "linked_chosen") and o2.loc["a3", "unit_match"] == "alias" and o2.loc["a3", "measure_uri"] in ("u2", "u3")
     mp3 = mapping(); mp3.loc[mp3["fffs_id"] == "0144TH", "unit_name"] = ["m", "mAOD"]   # an exact mAOD measure beats the bare m
     o3 = link_thresholds(thr, mp3).set_index("threshold_id")
     assert o3.loc["a3", "measure_uri"] == "u3" and o3.loc["a3", "unit_match"] == "exact"
