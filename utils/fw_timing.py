@@ -55,7 +55,10 @@ def gauges_from_links(links: pd.DataFrame, res_type: str = "RES", trigger_type: 
     d = d[lab(d["purpose"]) == purpose.strip().lower()]
     if "season" in d:
         d = d[lab(d["season"]).isin({season.strip().lower(), ""})]
-    d["value"] = pd.to_numeric(d["value"], errors="coerce")
+    # The value in the measure's own unit: job 28 converts an mAOD threshold to the gauge's local datum with z (and back), and writes the
+    # result to value_in_measure_unit. Where that column is missing or empty the file's own value is used.
+    own = pd.to_numeric(d["value"], errors="coerce")
+    d["value"] = pd.to_numeric(d["value_in_measure_unit"], errors="coerce").fillna(own) if "value_in_measure_unit" in d else own
     d["lead_h"] = pd.to_numeric(d["target_lead_minutes"], errors="coerce") / 60.0
     d = d[d["value"].notna()]
     out = []

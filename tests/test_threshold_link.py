@@ -133,3 +133,37 @@ def test_mald_and_masd_are_one_datum_but_ranked_below_exact_and_above_bare_m():
     assert with_exact.loc["a1", "measure_uri"] == "u_ex" and with_exact.loc["a1", "unit_match"] == "exact"        # exact beats both
     maod = mapping(); maod.loc[maod["fffs_id"] == "0130TH", "unit_name"] = "mAOD"
     assert link_thresholds(thr, maod).set_index("threshold_id").loc["a1", "link_status"] == "unit_mismatch"       # mAOD is never taken for ALD
+
+
+def z_file():
+    raw = raw_file()
+    raw["z"] = [93.67, 93.67, 87.0, 87.5, 80.0, None, 93.67]
+    raw.loc[raw["ID"] == "a3", "Unit"] = "mAOD"
+    raw.loc[raw["ID"] == "a3", "Value"] = 88.6          # 87.0 + 1.6 local
+    return raw
+
+
+def test_an_maod_threshold_is_moved_to_the_gauges_local_datum_with_z():
+    thr, _ = prepare_thresholds(z_file())
+    assert thr.set_index("threshold_id").loc["a3", "z"] == 87.0
+    mp = mapping(); mp.loc[mp["fffs_id"] == "0144TH", "unit_name"] = ["mASD", "mASD"]      # a3 is at 0144TH; the gauge is in mASD
+    out = link_thresholds(thr, mp).set_index("threshold_id")
+    assert out.loc["a3", "link_status"] in ("linked", "linked_chosen") and out.loc["a3", "unit_match"] == "converted"
+    assert abs(out.loc["a3", "value_in_measure_unit"] - 1.6) < 1e-9 and out.loc["a3", "z_used"] == 87.0 and out.loc["a3", "value"] == 88.6
+    assert "converted" in out.loc["a3", "link_note"]
+    # no z: left unmatched and says so
+    noz = z_file(); noz["z"] = None
+    o2 = link_thresholds(prepare_thresholds(noz)[0], mp).set_index("threshold_id")
+    assert o2.loc["a3", "link_status"] == "unit_mismatch" and "no z" in o2.loc["a3", "link_note"]
+    # an exact unit still beats a conversion
+    mp3 = pd.concat([mp, pd.DataFrame({"fffs_id": ["0144TH"], "telemetry_family": ["level"], "code_family": ["level"], "measure_uri": ["u_aod"],
+                                       "unit_name": ["mAOD"], "register_value_type": ["instantaneous"], "n_readings": [1]})], ignore_index=True)
+    o3 = link_thresholds(thr, mp3).set_index("threshold_id")
+    assert o3.loc["a3", "unit_match"] == "exact" and o3.loc["a3", "measure_uri"] == "u_aod" and o3.loc["a3", "value_in_measure_unit"] == 88.6
+
+
+def test_a_local_threshold_is_moved_up_to_an_maod_measure():
+    thr, _ = prepare_thresholds(z_file())
+    mp = mapping(); mp.loc[mp["fffs_id"] == "0130TH", "unit_name"] = "mAOD"          # a1 is mALD 0.99, z 93.67
+    out = link_thresholds(thr, mp).set_index("threshold_id")
+    assert out.loc["a1", "unit_match"] == "converted" and abs(out.loc["a1", "value_in_measure_unit"] - 94.66) < 1e-9
