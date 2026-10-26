@@ -220,6 +220,7 @@ Databricks, and slacken to 30 minutes if they approach 15.
 | `ea_rt_measures_mapped` (view) | Manual (16) | The measure register with each measure's gauge name, FFFS id and WISKI id. |
 | `ea_rt_wiski_lookup` (view) | Manual (16) | Matched measures that carry a WISKI id. Was a station-only join; now a view over the telemetry mapping. |
 | `ea_thresholds_all` | Manual (17) | Flood thresholds from the restricted volume. Lives in the restricted schema, `flood_forecasting_restricted`. |
+| `ea_fw_timing_validation` | Manual (27) | One row per RES crossing, or per warning with none: on time, too short, late, missed, with lead time against target. Restricted schema. |
 | `ea_fw_threshold_gauge_links` | Manual (28) | Observed flood warning thresholds, each linked to the gauge measure that agrees on FFFS_ID, parameter family and unit. Restricted schema. |
 
 ### Risk matrix labels
@@ -1165,6 +1166,7 @@ ones. See "History is an archive" above.
 │   ├── 15_rt_station_measure_register All EA stations and measures (manual)
 │   ├── 16_build_wiski_lookup          Telemetry mapping matched to measures: gauge names, FFFS and WISKI ids (manual)
 │   ├── 17_build_thresholds_table      Flood thresholds into the restricted schema (manual)
+│   ├── 27_fw_timing_validation        Was each flood warning out before the RES level, by the target lead time (manual, restricted)
 │   └── 28_link_thresholds_to_gauges   Observed flood warning thresholds linked to gauge measures, restricted schema (manual)
 ├── master/                            Schedule these notebooks
 │   ├── Master_polling, Master_daily, Master_weekly, Master_quarterly
@@ -1385,6 +1387,13 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
   (`threshold_unit`, `measure_unit`) and re-run. Every Type (ACTCON, RES) and Purpose is kept as a column. Status per row:
   `linked`, `linked_chosen` (several measures agree; the instantaneous one with most readings), `unit_mismatch`,
   `no_measure`, `no_gauge`, `no_family`. Output `ea_fw_threshold_gauge_links`, restricted schema.
+- **27** checks flood warning timing. For each gauge with a linked RES level (job 28: Type RES, Purpose FW, the level at which
+  impacts are expected) it finds every upward crossing in the readings and the flood warning in force for the threshold's
+  TargetAreaID at that moment. Outcomes: `on time` (issued at least the target lead time before the crossing, from
+  TargetLeadTimeMinutes), `too short`, `late`, `missed`; and for a warning with no crossing, `RES not reached` or
+  `no readings`. The trigger level (Type ACTCON, Purpose FW) gives `trigger_time` and `issue_delay_hours`. It uses only
+  thresholds that job 28 linked to a measure of the same unit, so it never compares a level on one datum with readings on
+  another. Flood alert rows are not validated. Output `ea_fw_timing_validation`, restricted schema.
 
 ## Tests
 
