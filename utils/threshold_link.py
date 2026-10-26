@@ -18,7 +18,8 @@
 #   2. Parameter's family: H is level, Q is flow, and so on (family_of_code), against the measure's family.
 # Then the UNIT must agree. The threshold's Unit (mALD) is compared with the measure's unit_name, which for a
 # level is its datum (mAOD, mASD, mALD ...). The two are compared after case and spacing are ignored, and
-# through an alias table for spellings that differ. A measure whose unit does not agree is never linked: the
+# through an alias table for spellings that differ. A bare "m" (no datum named) is taken as mALD by default, only when
+# the gauge has no measure in exactly the threshold's unit; unit_match says exact or alias. A measure whose unit does not agree is never linked: the
 # row says unit_mismatch and names the units the gauge does have, so the alias table can be filled in
 # from the profile rather than guessed.
 #
@@ -142,12 +143,19 @@ def prepare_thresholds(raw: pd.DataFrame, columns: dict = None, basis_label: str
     return df, report
 
 
+# Units that are taken to mean the same without being told. The register often gives a level in plain "m" with no datum named,
+# where the thresholds say mALD. A bare "m" is only a fallback: a measure whose unit is exactly the threshold's is always preferred,
+# and a link made through an alias says so (unit_match = alias).
+DEFAULT_ALIASES = {"mald": {"m"}, "m": {"mald"}}
+
+
 def prepare_aliases(aliases: pd.DataFrame = None) -> dict:
     """
     {threshold unit key: set of measure unit keys it also means}. `aliases` has two columns, threshold_unit and
-    measure_unit (any case, spaces and underscores ignored); each row also works the other way round. None or empty gives {}.
+    measure_unit (any case, spaces and underscores ignored); each row also works the other way round. They are added to
+    DEFAULT_ALIASES (mALD and m). None or empty gives the defaults.
     """
-    out = {}
+    out = {k: set(v) for k, v in DEFAULT_ALIASES.items()}
     if aliases is None or len(aliases) == 0:
         return out
     present = {_norm(c): c for c in aliases.columns}
@@ -185,7 +193,7 @@ def link_thresholds(thr: pd.DataFrame, mapping: pd.DataFrame, aliases: dict = No
     with a measure_uri count. The result has every column of `thr` plus link_status, link_note, n_candidates and the chosen
     measure's columns (measure_uri, station_label, unit_name, register_value_type, n_readings ...).
     """
-    aliases = aliases or {}
+    aliases = DEFAULT_ALIASES if aliases is None else aliases
     m = mapping.copy()
     for c in _MEASURE_COLS:
         if c not in m:
@@ -201,6 +209,7 @@ def link_thresholds(thr: pd.DataFrame, mapping: pd.DataFrame, aliases: dict = No
         out = dict(t)
         out.update({c: None for c in _MEASURE_COLS})
         out["n_candidates"] = 0
+        out["unit_match"] = None
         g = by_key.get(t["key"])
         if not t.get("family"):
             status, note = "no_family", f"Parameter {t.get('parameter')} names no family"
@@ -212,6 +221,9 @@ def link_thresholds(thr: pd.DataFrame, mapping: pd.DataFrame, aliases: dict = No
                 status, note = "no_measure", f"the gauge has no {t['family']} measure in the register"
             else:
                 agree = cands[[_unit_agrees(t.get("unit"), u, aliases) for u in cands["unit_name"]]]
+                exact = agree[[unit_key(u) == unit_key(t.get("unit")) for u in agree["unit_name"]]]
+                via_alias = exact.empty and not agree.empty
+                agree = exact if len(exact) else agree                                       # an exact unit beats an aliased one
                 if agree.empty:
                     have = sorted({clean(u) or "(no unit)" for u in cands["unit_name"]})
                     status, note = "unit_mismatch", f"threshold unit {t.get('unit')}; the gauge's {t['family']} measures are in {', '.join(have)}"
@@ -222,9 +234,12 @@ def link_thresholds(thr: pd.DataFrame, mapping: pd.DataFrame, aliases: dict = No
                     one = len(agree) == 1
                     status = "linked" if one else "linked_chosen"
                     note = "" if one else f"{len(agree)} measures agree on unit; chose the instantaneous one with the most readings"
+                    if via_alias:
+                        note = (note + "; " if note else "") + f"measure unit {clean(best.iloc[0]['unit_name'])} taken as the threshold's {t.get('unit')}"
+                    out["unit_match"] = "alias" if via_alias else "exact"
         out["link_status"], out["link_note"] = status, note
         rows.append(out)
-    cols = list(thr.columns) + ["link_status", "link_note", "n_candidates"] + _MEASURE_COLS
+    cols = list(thr.columns) + ["link_status", "link_note", "n_candidates", "unit_match"] + _MEASURE_COLS
     return pd.DataFrame(rows, columns=cols)
 
 
