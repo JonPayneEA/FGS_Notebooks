@@ -220,6 +220,7 @@ Databricks, and slacken to 30 minutes if they approach 15.
 | `ea_rt_measures_mapped` (view) | Manual (16) | The measure register with each measure's gauge name, FFFS id and WISKI id. |
 | `ea_rt_wiski_lookup` (view) | Manual (16) | Matched measures that carry a WISKI id. Was a station-only join; now a view over the telemetry mapping. |
 | `ea_thresholds_all` | Manual (17) | Flood thresholds from the restricted volume. Lives in the restricted schema, `flood_forecasting_restricted`. |
+| `ea_fw_threshold_gauge_links` | Manual (28) | Observed flood warning thresholds, each linked to the gauge measure that agrees on FFFS_ID, parameter family and unit. Restricted schema. |
 
 ### Risk matrix labels
 
@@ -1163,7 +1164,8 @@ ones. See "History is an archive" above.
 │   ├── 12_ea_area_boundaries_download EA administrative boundaries (manual)
 │   ├── 15_rt_station_measure_register All EA stations and measures (manual)
 │   ├── 16_build_wiski_lookup          Telemetry mapping matched to measures: gauge names, FFFS and WISKI ids (manual)
-│   └── 17_build_thresholds_table      Flood thresholds into the restricted schema (manual)
+│   ├── 17_build_thresholds_table      Flood thresholds into the restricted schema (manual)
+│   └── 28_link_thresholds_to_gauges   Observed flood warning thresholds linked to gauge measures, restricted schema (manual)
 ├── master/                            Schedule these notebooks
 │   ├── Master_polling, Master_daily, Master_weekly, Master_quarterly
 ├── explore/
@@ -1371,7 +1373,17 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
   ```
 
 - **17** loads the thresholds CSV into the restricted schema. Keep it out of joins
-  with unrestricted outputs.
+  with unrestricted outputs. The file is `Thresholds/2026_02_01_EA_Thresholds.csv` in the restricted
+  volume; every column is read as text.
+- **28** links the Observed thresholds whose CatDesc is Flood Warning to the gauges the real-time import holds.
+  Location is the FFFS_ID (case and leading zeros ignored). The Parameter's family (H is level, Q is flow) must
+  match the measure's, and the threshold's Unit (mALD, mAOD ...) must agree with the measure's unit_name, because a
+  level is only comparable on the same datum. A measure whose unit disagrees is never linked: the row says
+  `unit_mismatch` and names the units the gauge has. The notebook prints the units and parameters of the rows kept
+  first; if two sources word one unit differently, list the pair in `Thresholds/unit_aliases.csv`
+  (`threshold_unit`, `measure_unit`) and re-run. Every Type (ACTCON, RES) and Purpose is kept as a column. Status per row:
+  `linked`, `linked_chosen` (several measures agree; the instantaneous one with most readings), `unit_mismatch`,
+  `no_measure`, `no_gauge`, `no_family`. Output `ea_fw_threshold_gauge_links`, restricted schema.
 
 ## Tests
 
