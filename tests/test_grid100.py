@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.grid100 import (  # noqa: E402
     CELL_M, aggregate_to_areas, apportion_to_cells, band_rank, cell_centre, cell_key, cell_xy, polygon_cells, polygons_to_cells,
-    risk_score, worst_band_by_cell, covered_cells, union_total, primary_area, area_overlap_stats,
+    risk_score, worst_band_by_cell, covered_cells, union_total, primary_area, area_overlap_stats, overlap_depth, pair_overlaps,
 )
 
 
@@ -110,3 +110,19 @@ def test_gross_unique_and_split_totals_separate_what_is_shared():
     assert s["population_gross"].sum() == 330.0
     assert s.loc["W1", "population_unique"] == 50.0 and s.loc["W2", "population_unique"] == 40.0 and s.loc["A", "population_unique"] == 120.0
     assert s.loc["A", "population_shared"] == 90.0
+
+
+def test_the_depth_and_pairs_of_overlap_between_warning_areas_are_measured():
+    # three warning areas: W1 cells 1-4, W2 cells 3-6, W3 the same ground as W2 (a duplicate code)
+    area_cells = pd.DataFrame({"id": ["W1"] * 4 + ["W2"] * 4 + ["W3"] * 4, "cell_key": [1, 2, 3, 4, 3, 4, 5, 6, 3, 4, 5, 6]})
+    grid = pd.DataFrame({"cell_key": [1, 2, 3, 4, 5, 6], "population": [10.0, 10.0, 10.0, 10.0, 10.0, 10.0]})
+    d = overlap_depth(area_cells, grid, ["population"]).set_index("n_areas")
+    # cells 1 and 2 are covered once, 5 and 6 twice (W2 and W3), 3 and 4 three times
+    assert d.loc[1, "cells"] == 2 and d.loc[2, "cells"] == 2 and d.loc[3, "cells"] == 2
+    assert d["population"].sum() == 60.0
+    p = pair_overlaps(area_cells, grid, ["population"])
+    top = p.iloc[0]
+    assert (top["id_a"], top["id_b"]) == ("W2", "W3") and top["shared_cells"] == 4 and top["share_of_a"] == 1.0 and top["share_of_b"] == 1.0   # the same ground twice
+    w1w2 = p[(p["id_a"] == "W1") & (p["id_b"] == "W2")].iloc[0]
+    assert w1w2["shared_cells"] == 2 and w1w2["population"] == 20.0 and w1w2["share_of_a"] == 0.5
+    assert pair_overlaps(area_cells[area_cells["id"] == "W1"], grid, ["population"]).empty

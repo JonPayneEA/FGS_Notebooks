@@ -38,18 +38,20 @@ A polygon owns the cells whose **centre** is inside it. One rule is used for war
 
 ## Overlapping areas
 
-Flood alert areas contain flood warning areas, and warning areas can overlap each other, so adding polygon totals counts people twice. The rule is: **the cell is the unit of truth**. A person lives in one cell.
+Adding polygon totals counts people twice wherever areas overlap. The rule is: **the cell is the unit of truth**. A person lives in one cell.
 
-- **A total over many areas** (for example everyone under any warning in force now, or a regional total) is taken over the **distinct cells** the areas cover (`union_total`). It is never a sum of area totals.
-- **Each area's own figure** is kept and labelled **gross**: everything inside it, which may also be inside another area. Use it for "how many people are in this area".
-- **Where figures must add up across areas**, each cell is given to one **primary area** by a stated precedence (`primary_area`), and the area's **unique** figure counts only its own cells. Default precedence: in force now, then the higher severity (severe, warning, alert), then a warning area before an alert area, then the smaller (more specific) area, then the lowest area code so the answer never changes. The unique figures add up to the union total.
-- **A split alternative.** Each cell is shared equally among the areas that cover it (`split`), which also adds up and treats every covering area alike.
-- **Shared.** Gross minus unique: what an area shares with a higher-precedence area. Useful to see how much of an alert area is also covered by warnings.
-- **By level in force.** For "people covered by a severe warning, a warning or only an alert", each cell takes the highest in-force level covering it. The three figures are additive and sum to the union.
+**Alerts and warnings.** A flood alert area contains the flood warning areas inside it. That interaction is easy: filter to alerts or to warnings, and the two never meet.
 
-The same rule applies to the forecast polygons, which overlap by source and day: a cell takes the worst band, and totals are over distinct cells. Code and tests: `utils/grid100.py` (`covered_cells`, `union_total`, `primary_area`, `area_overlap_stats`).
+**Warning over warning** is the real problem, because there is no parent and child between warnings: two fluvial areas can meet, and a fluvial and a coastal or tidal area can cover the same ground. The approach has four parts.
 
-In the app, the warning areas table shows the gross figure with a small "includes people also in N other areas" note, and the top of the page and any regional or national total use the distinct-cell total.
+1. **Measure it first.** `overlap_depth` says how many cells are covered once, twice, three times, and how many people are in each group. `pair_overlaps` lists every pair of warning areas that share ground, the shared cells and people, and what share of each area is shared. A pair where both shares are near 1 is the same ground under two codes, which is a data question and not an analysis one. Run on warning areas only, this shows how large the problem is before any rule is chosen.
+2. **Mass analysis uses distinct cells.** Everyone under any warning in force, a regional total, a national total: taken over the distinct cells the areas cover (`union_total`). Never a sum of area totals.
+3. **Each area keeps its own figure, labelled gross**: everything inside it, which may also sit in another warning area. It is right for "how many people are in this area". The warning areas table shows it with "includes people also in N other warning areas", and the pair table is one click away.
+4. **Where figures must add up across warning areas**, the default is an **equal split**: each cell is shared equally among the warning areas that cover it, so the parts sum to the union total. That treats overlapping warnings alike, which suits areas with no natural hierarchy. An optional **primary area** rule is kept (in force first, then the higher severity, then the smaller area, then the lowest code), and a source-aware rule is possible where the hazard bands say which source drives a cell (fluvial or coastal).
+
+**By level in force.** Each cell takes the highest in-force level covering it. The figures for severe, warning and alert are additive and sum to the union.
+
+The same rule applies to the forecast polygons, which overlap by source and day: a cell takes the worst band, and totals are over distinct cells. Code and tests: `utils/grid100.py` (`covered_cells`, `union_total`, `overlap_depth`, `pair_overlaps`, `primary_area`, `area_overlap_stats`).
 
 ## The score
 

@@ -19,6 +19,7 @@
 #   aggregate_to_areas                 add cell columns up to areas, optionally split by a band
 #   covered_cells / union_total        the cells covered by ANY of a set of areas, and a total over them: each person counted once
 #   primary_area                       one owning area per cell when areas overlap, by a stated precedence
+#   overlap_depth / pair_overlaps      how much areas overlap: cells by how many cover them, and each overlapping pair with its shared people
 #   area_overlap_stats                 per area: gross (all its cells, may overlap), unique (cells it owns, additive), shared, and an equal split
 #   risk_score                         the adjustable composite score, with its weights in config.RISK_SCORE_WEIGHTS
 # =============================================================================
@@ -152,6 +153,39 @@ def primary_area(area_cells: pd.DataFrame, meta: pd.DataFrame, order=None) -> pd
     n = d.groupby("cell_key").size().rename("n_areas")
     first = d.drop_duplicates("cell_key", keep="first")[["cell_key", "id"]].rename(columns={"id": "primary_id"})
     return first.merge(n, left_on="cell_key", right_index=True)
+
+
+def overlap_depth(area_cells: pd.DataFrame, grid: pd.DataFrame = None, sum_cols=()) -> pd.DataFrame:
+    """
+    How many cells are covered by one area, two, three ...: n_areas, cells, and the grid's `sum_cols` in those cells. Run it on the warning
+    areas alone (filter `area_cells` to warnings first) to see how big the warning-over-warning problem is before choosing a rule. A row with
+    n_areas 1 is clean; every other row is people counted more than once if polygon totals are added.
+    """
+    n = area_cells.groupby("cell_key").size().rename("n_areas").reset_index()
+    if grid is not None and len(sum_cols):
+        n = n.merge(grid[["cell_key", *sum_cols]], on="cell_key", how="left")
+    out = n.groupby("n_areas").agg(cells=("cell_key", "size"), **{c: (c, "sum") for c in sum_cols}).reset_index()
+    return out
+
+
+def pair_overlaps(area_cells: pd.DataFrame, grid: pd.DataFrame, sum_cols, min_cells: int = 1) -> pd.DataFrame:
+    """
+    Every pair of areas that share cells: id_a, id_b, shared_cells, the `sum_cols` in the shared cells, and what share of each area's cells
+    is shared (share_of_a, share_of_b). Sorted with the largest overlaps first. A share near 1 for both means two codes drawn over the
+    same ground.
+    """
+    cells = area_cells.drop_duplicates(["id", "cell_key"])
+    size = cells.groupby("id").size()
+    pairs = cells.merge(cells, on="cell_key", suffixes=("_a", "_b"))
+    pairs = pairs[pairs["id_a"] < pairs["id_b"]]
+    if pairs.empty:
+        return pd.DataFrame(columns=["id_a", "id_b", "shared_cells", *sum_cols, "share_of_a", "share_of_b"])
+    pairs = pairs.merge(grid[["cell_key", *sum_cols]], on="cell_key", how="left")
+    out = pairs.groupby(["id_a", "id_b"]).agg(shared_cells=("cell_key", "size"), **{c: (c, "sum") for c in sum_cols}).reset_index()
+    out = out[out["shared_cells"] >= min_cells]
+    out["share_of_a"] = (out["shared_cells"] / out["id_a"].map(size)).round(4)
+    out["share_of_b"] = (out["shared_cells"] / out["id_b"].map(size)).round(4)
+    return out.sort_values("shared_cells", ascending=False).reset_index(drop=True)
 
 
 def area_overlap_stats(grid: pd.DataFrame, area_cells: pd.DataFrame, meta: pd.DataFrame, sum_cols, order=None) -> pd.DataFrame:
