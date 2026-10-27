@@ -177,3 +177,18 @@ def test_a_z_of_zero_is_not_used_to_convert_unless_asked():
     assert out.loc["a3", "link_status"] == "unit_mismatch" and "z is 0" in out.loc["a3", "link_note"]
     kept = link_thresholds(thr, mp, zero_z_is_missing=False).set_index("threshold_id")
     assert kept.loc["a3", "unit_match"] == "converted" and kept.loc["a3", "value_in_measure_unit"] == 88.6
+
+
+def test_the_label_prefix_column_is_carried_to_the_links_by_guess_or_by_name():
+    raw = raw_file()
+    raw["LabelDescriptionPrefix"] = ["RES FW"] * 7
+    thr, rep = prepare_thresholds(raw)
+    assert rep["columns"]["label_prefix"] == "LabelDescriptionPrefix" and set(thr["label_prefix"]) == {"RES FW"}
+    odd = raw_file(); odd["Label Prefix Text"] = "ACTCON FW"                           # a name not in the guesses, found by "label" and "prefix"
+    assert set(prepare_thresholds(odd)[0]["label_prefix"]) == {"ACTCON FW"}
+    named = raw_file().rename(columns={"Purpose": "Purp"}); named["Whatever"] = "X"
+    assert set(prepare_thresholds(named, {"label_prefix": "Whatever", "purpose": "Purp"})[0]["label_prefix"]) == {"X"}
+    thr2, rep2 = prepare_thresholds(raw_file())
+    assert rep2["columns"]["label_prefix"] is None and thr2["label_prefix"].isna().all()   # absent: the column is empty, nothing breaks
+    mp = mapping()
+    assert "label_prefix" in link_thresholds(thr, mp).columns
