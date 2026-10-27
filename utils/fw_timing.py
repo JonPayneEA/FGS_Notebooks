@@ -31,7 +31,7 @@
 
 import pandas as pd
 
-from utils.telemetry_mapping import clean
+from utils.telemetry_mapping import clean, id_key
 
 WARNING_LEVELS = {"flood_warning", "severe_flood_warning"}
 
@@ -51,6 +51,8 @@ def gauges_from_links(links: pd.DataFrame, res_type: str = "RES", trigger_type: 
     if links is None or links.empty:
         return pd.DataFrame(columns=cols)
     d = links[links["link_status"].isin(["linked", "linked_chosen"])].copy()
+    if "key" not in d:                                   # job 28 does not write its comparison key, so it is rebuilt from the FFFS_ID
+        d["key"] = d["fffs_id"].map(id_key)
     lab = lambda s: s.map(lambda v: (clean(v) or "").lower())          # noqa: E731
     d = d[lab(d["purpose"]) == purpose.strip().lower()]
     if "season" in d:
