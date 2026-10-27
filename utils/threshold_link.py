@@ -195,9 +195,13 @@ def _order(cands: pd.DataFrame) -> pd.DataFrame:
 _LOCAL = {"mald", "masd"}
 
 
-def _conversion(threshold_unit_key, measure_unit_key, z):
-    """The amount to add to the threshold value to put it in the measure's datum, or None when no conversion applies."""
-    if z is None or pd.isna(z):
+def _conversion(threshold_unit_key, measure_unit_key, z, zero_z_is_missing=True):
+    """
+    The amount to add to the threshold value to put it in the measure's datum, or None when no conversion applies. A z of exactly 0
+    is treated as "not set" by default (zero_z_is_missing): a gauge zero at precisely 0 mAOD is unlikely, and a 0 would leave an mAOD
+    value (27.28) to be compared with local-datum readings.
+    """
+    if z is None or pd.isna(z) or (zero_z_is_missing and float(z) == 0.0):
         return None
     if threshold_unit_key == "maod" and measure_unit_key in _LOCAL:
         return -float(z)
@@ -210,7 +214,7 @@ _MEASURE_COLS = ["measure_uri", "station_reference", "station_label", "register_
                  "unit_name", "register_value_type", "n_readings", "first_reading", "last_reading"]
 
 
-def link_thresholds(thr: pd.DataFrame, mapping: pd.DataFrame, aliases: dict = None) -> pd.DataFrame:
+def link_thresholds(thr: pd.DataFrame, mapping: pd.DataFrame, aliases: dict = None, zero_z_is_missing: bool = True) -> pd.DataFrame:
     """
     Each threshold with the gauge measure it links to and a status (see the top of the file). `mapping` is the
     telemetry mapping table (fffs_id, telemetry_family or code_family, and the matched measure's columns); only its rows
@@ -260,13 +264,19 @@ def link_thresholds(thr: pd.DataFrame, mapping: pd.DataFrame, aliases: dict = No
                 convert = None
                 if agree.empty:
                     tk_ = unit_key(t.get("unit"))
-                    conv = cands[[_conversion(tk_, unit_key(u), t.get("z")) is not None for u in cands["unit_name"]]]
+                    conv = cands[[_conversion(tk_, unit_key(u), t.get("z"), zero_z_is_missing) is not None for u in cands["unit_name"]]]
                     if len(conv):
                         agree, match_kind, via_alias = conv, "converted", True
-                        convert = _conversion(tk_, unit_key(_order(conv).iloc[0]["unit_name"]), t.get("z"))
+                        convert = _conversion(tk_, unit_key(_order(conv).iloc[0]["unit_name"]), t.get("z"), zero_z_is_missing)
                 if agree.empty:
                     have = sorted({clean(u) or "(no unit)" for u in cands["unit_name"]})
-                    why = "; no z to convert with" if (unit_key(t.get("unit")) in ({"maod"} | _LOCAL) and pd.isna(t.get("z"))) else ""
+                    why = ""
+                    if unit_key(t.get("unit")) in ({"maod"} | _LOCAL):
+                        z_ = t.get("z")
+                        if z_ is None or pd.isna(z_):
+                            why = "; no z to convert with"
+                        elif zero_z_is_missing and float(z_) == 0.0:
+                            why = "; z is 0, taken as not set"
                     status, note = "unit_mismatch", f"threshold unit {t.get('unit')}; the gauge's {t['family']} measures are in {', '.join(have)}{why}"
                 else:
                     best = _order(agree)

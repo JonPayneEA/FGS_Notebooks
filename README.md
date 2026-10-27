@@ -1388,7 +1388,9 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
   An mAOD threshold at a gauge whose measures are mASD or mALD is moved to the measure's datum with the file's `z`
   (the gauge zero in mAOD): `value_in_measure_unit` = value minus z, and the other way round (a local threshold at an mAOD
   measure: value plus z). `unit_match = converted`, the original `value` and `z_used` are kept, and job 27 compares with
-  `value_in_measure_unit`. Without a number in z the row stays `unit_mismatch`; if two sources word one unit differently, list the pair in `Thresholds/unit_aliases.csv`
+  `value_in_measure_unit`. Without a number in z the row stays `unit_mismatch`, and a z of exactly 0 is taken as not set (the `z_zero_is_missing`
+  widget, default true), because a gauge zero at precisely 0 mAOD is unlikely and a 0 would leave an mAOD value to be compared
+  with local readings; if two sources word one unit differently, list the pair in `Thresholds/unit_aliases.csv`
   (`threshold_unit`, `measure_unit`) and re-run. Every Type (ACTCON, RES) and Purpose is kept as a column. Status per row:
   `linked`, `linked_chosen` (several measures agree; the instantaneous one with most readings), `unit_mismatch`,
   `no_measure`, `no_gauge`, `no_family`. Output `ea_fw_threshold_gauge_links`, restricted schema.
