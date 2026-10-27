@@ -11,6 +11,10 @@ For every flood warning area and flood alert area, and for every constituency:
 - **Critical sites.** Counts by group (health and care, education, emergency services and prisons, utilities and hazardous sites), and by risk band.
 - **A gridded risk product.** A 100 m British National Grid layer holding all of the above per cell, with an adjustable composite score on top. The layers are always stored. The score is never the only thing kept.
 
+## What it will look like
+
+A mock-up with invented numbers, in the app's design, is in `docs/EXPOSURE_MOCKUP.html` (open it in a browser). It shows a new Areas section with a sortable warning areas table, one page per area (key figures, the 100 m risk grid, a breakdown by band for rivers and sea and for surface water, and the critical sites in High or Medium bands), the extra lines in a forecast map popup, and the new exports. The flood bands use a blue ramp and the score a magenta one, so neither is mistaken for a forecast level.
+
 ## Decisions already made
 
 | Decision | Choice |
@@ -52,6 +56,10 @@ A polygon owns the cells whose **centre** is inside it. One rule is used for war
 | Fire, police, ambulance stations, prisons | Mixed public sources | To be chosen | Open sources are patchy: check completeness |
 | Electricity substations, water and sewage works, COMAH sites | Mixed; possibly EA internal | Governed table if you have it | **Needed from you** |
 | Combined authority, local authority, police and fire areas | ONS Open Geography Portal | Download | Local resilience forums: source not yet found |
+
+## First step: survey what the workspace holds
+
+`explore/Explore_exposure_inputs.ipynb` is read only. It tests which public sites the cluster can reach, searches the catalogue for governed tables that look like the datasets above, and lists the volumes. Its three result tables decide how jobs 29 to 32 are built.
 
 ## Jobs and order
 
