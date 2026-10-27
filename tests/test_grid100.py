@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.grid100 import (  # noqa: E402
     CELL_M, aggregate_to_areas, apportion_to_cells, band_rank, cell_centre, cell_key, cell_xy, polygon_cells, polygons_to_cells,
-    risk_score, worst_band_by_cell,
+    risk_score, worst_band_by_cell, covered_cells, union_total, primary_area, area_overlap_stats,
 )
 
 
@@ -71,3 +71,42 @@ def test_the_score_needs_a_hazard_and_rises_with_exposure_vulnerability_and_crit
     assert s[4] > s[2]                                                 # a critical site
     assert 0 <= s.min() and s.max() <= 100
     assert (risk_score(g.drop(columns=["critical_sites"]), {"pop": 1}) >= 0).all()     # a missing column counts as zero
+
+
+def nested_example():
+    # An alert area A covers cells 1 to 6. Two warning areas sit inside it: W1 on cells 2, 3 and W2 on cells 3, 4 (they overlap on 3).
+    area_cells = pd.DataFrame({"id": ["A"] * 6 + ["W1", "W1", "W2", "W2"], "cell_key": [1, 2, 3, 4, 5, 6, 2, 3, 3, 4]})
+    meta = pd.DataFrame({"id": ["A", "W1", "W2"], "is_warning": [0, 1, 1], "area_km2": [5.0, 1.0, 1.2], "in_force": [1, 1, 1], "severity": [1, 2, 2]})      # severity as a rank: alert 1, warning 2, severe 3
+    grid = pd.DataFrame({"cell_key": [1, 2, 3, 4, 5, 6, 7], "population": [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 999.0]})
+    return area_cells, meta, grid
+
+
+def test_a_total_over_overlapping_areas_counts_each_cell_once():
+    area_cells, meta, grid = nested_example()
+    assert list(covered_cells(area_cells)) == [1, 2, 3, 4, 5, 6]
+    assert union_total(grid, area_cells, ["population"])["population"] == 210.0          # not the sum of the area totals (210 + 50 + 70)
+    assert union_total(grid, area_cells, ["population"], ids=["W1", "W2"])["population"] == 90.0
+    assert list(covered_cells(area_cells, ids=["W1"])) == [2, 3]
+
+
+def test_each_cell_goes_to_one_primary_area_by_precedence():
+    area_cells, meta, grid = nested_example()
+    p = primary_area(area_cells, meta).set_index("cell_key")
+    assert p.loc[1, "primary_id"] == "A" and p.loc[5, "primary_id"] == "A"              # only the alert area covers them
+    assert p.loc[2, "primary_id"] == "W1"                                               # in force, then the higher severity: the warning beats the alert
+    assert p.loc[3, "primary_id"] in ("W1", "W2") and p.loc[3, "n_areas"] == 3
+    # a stricter, explicit order: a warning before an alert, then the smaller area
+    q = primary_area(area_cells, meta, order=[("is_warning", False), ("area_km2", True), ("id", True)]).set_index("cell_key")
+    assert q.loc[2, "primary_id"] == "W1" and q.loc[3, "primary_id"] == "W1" and q.loc[4, "primary_id"] == "W2" and q.loc[1, "primary_id"] == "A"
+
+
+def test_gross_unique_and_split_totals_separate_what_is_shared():
+    area_cells, meta, grid = nested_example()
+    order = [("is_warning", False), ("area_km2", True), ("id", True)]
+    s = area_overlap_stats(grid, area_cells, meta, ["population"], order).set_index("id")
+    assert s.loc["A", "population_gross"] == 210.0 and s.loc["W1", "population_gross"] == 50.0 and s.loc["W2", "population_gross"] == 70.0
+    # unique and split both add up across areas to the union total, so they are safe to add; gross is not
+    assert abs(s["population_unique"].sum() - 210.0) < 1e-9 and abs(s["population_split"].sum() - 210.0) < 1e-9
+    assert s["population_gross"].sum() == 330.0
+    assert s.loc["W1", "population_unique"] == 50.0 and s.loc["W2", "population_unique"] == 40.0 and s.loc["A", "population_unique"] == 120.0
+    assert s.loc["A", "population_shared"] == 90.0

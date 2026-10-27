@@ -17,6 +17,9 @@
 #   worst_band_by_cell                 the highest band where polygons overlap
 #   band_rank                          "High", "Medium", "Low", "Very Low" (any case) to 4, 3, 2, 1; anything else 0
 #   aggregate_to_areas                 add cell columns up to areas, optionally split by a band
+#   covered_cells / union_total        the cells covered by ANY of a set of areas, and a total over them: each person counted once
+#   primary_area                       one owning area per cell when areas overlap, by a stated precedence
+#   area_overlap_stats                 per area: gross (all its cells, may overlap), unique (cells it owns, additive), shared, and an equal split
 #   risk_score                         the adjustable composite score, with its weights in config.RISK_SCORE_WEIGHTS
 # =============================================================================
 
@@ -112,6 +115,65 @@ def aggregate_to_areas(grid: pd.DataFrame, area_cells: pd.DataFrame, sum_cols, b
     out = d.groupby(keys, dropna=False)[list(sum_cols)].sum().reset_index()
     out["cells"] = d.groupby(keys, dropna=False).size().to_numpy()
     return out
+
+
+# -----------------------------------------------------------------------------
+# Overlapping areas. Flood alert areas contain flood warning areas, and warning areas can overlap each other, so adding polygon totals
+# counts people twice. The cell is the unit of truth: a person lives in one cell, so
+#   - a total over many areas is taken over the DISTINCT cells they cover (union_total), never as a sum of area totals;
+#   - where an additive per-area figure is needed, each cell is given to one primary area by a stated precedence (primary_area), or split
+#     equally among the areas that cover it, so the parts add up to the whole;
+#   - an area's own total (gross) is still reported, labelled as possibly overlapping.
+# -----------------------------------------------------------------------------
+
+def covered_cells(area_cells: pd.DataFrame, ids=None) -> np.ndarray:
+    """The distinct cells covered by any of the areas (all of them, or just `ids`)."""
+    d = area_cells if ids is None else area_cells[area_cells["id"].isin(list(ids))]
+    return np.sort(d["cell_key"].unique())
+
+
+def union_total(grid: pd.DataFrame, area_cells: pd.DataFrame, sum_cols, ids=None) -> pd.Series:
+    """The grid's `sum_cols` over the distinct cells covered by any of the areas: each person, property and site counted once."""
+    k = covered_cells(area_cells, ids)
+    return grid[grid["cell_key"].isin(k)][list(sum_cols)].sum()
+
+
+def primary_area(area_cells: pd.DataFrame, meta: pd.DataFrame, order=None) -> pd.DataFrame:
+    """
+    One owning area for each cell, with n_areas (how many cover it). `meta` has an `id` and the columns named in `order`, a list of
+    (column, ascending) pairs, best first. The default precedence is: in force now first, then the higher severity (a rank: 3 severe, 2 warning,
+    1 alert; the feed's severity_level runs the other way, 1 severe to 3 alert, so use 4 minus the level), then a warning area before an alert area, then the smaller area (the more specific), then the lowest id so that the
+    answer is always the same. Columns missing from `meta` are skipped.
+    """
+    order = order or [("in_force", False), ("severity", False), ("is_warning", False), ("area_km2", True), ("id", True)]
+    d = area_cells.merge(meta, on="id", how="left")
+    cols = [(c, a) for c, a in order if c in d.columns]
+    d = d.sort_values([c for c, _ in cols], ascending=[a for _, a in cols], kind="mergesort")
+    n = d.groupby("cell_key").size().rename("n_areas")
+    first = d.drop_duplicates("cell_key", keep="first")[["cell_key", "id"]].rename(columns={"id": "primary_id"})
+    return first.merge(n, left_on="cell_key", right_index=True)
+
+
+def area_overlap_stats(grid: pd.DataFrame, area_cells: pd.DataFrame, meta: pd.DataFrame, sum_cols, order=None) -> pd.DataFrame:
+    """
+    For each area and each of `sum_cols`: <col>_gross (all its cells, so areas that overlap double count), <col>_unique (only the cells it is the
+    primary area of: these add up across areas to the union total), <col>_split (each cell shared equally among the areas that cover it:
+    these also add up), and <col>_shared (gross minus unique, what it shares with a higher-precedence area).
+    """
+    prim = primary_area(area_cells, meta, order)
+    d = area_cells.merge(grid[["cell_key", *sum_cols]], on="cell_key", how="left").merge(prim, on="cell_key")
+    d["is_primary"] = d["id"] == d["primary_id"]
+    out = pd.DataFrame({"id": sorted(area_cells["id"].unique())}).set_index("id")
+    for c in sum_cols:
+        out[f"{c}_gross"] = d.groupby("id")[c].sum()
+        out[f"{c}_unique"] = d[d["is_primary"]].groupby("id")[c].sum()
+        out[f"{c}_split"] = (d[c] / d["n_areas"]).groupby(d["id"]).sum()
+    out = out.fillna(0.0)
+    for c in sum_cols:
+        out[f"{c}_shared"] = out[f"{c}_gross"] - out[f"{c}_unique"]
+    out["cells"] = d.groupby("id").size()
+    out["cells_unique"] = d[d["is_primary"]].groupby("id").size()
+    return out.fillna(0).reset_index()
 
 
 def risk_score(grid: pd.DataFrame, weights: dict, crit_cap: int = 3) -> pd.Series:

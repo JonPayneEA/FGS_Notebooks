@@ -36,6 +36,21 @@ A polygon owns the cells whose **centre** is inside it. One rule is used for war
 - **Critical sites.** A point goes to the cell containing it. Stored as counts per group and in total.
 - **Warning areas.** Each area owns its cells. Its figures are sums over those cells, optionally split by band.
 
+## Overlapping areas
+
+Flood alert areas contain flood warning areas, and warning areas can overlap each other, so adding polygon totals counts people twice. The rule is: **the cell is the unit of truth**. A person lives in one cell.
+
+- **A total over many areas** (for example everyone under any warning in force now, or a regional total) is taken over the **distinct cells** the areas cover (`union_total`). It is never a sum of area totals.
+- **Each area's own figure** is kept and labelled **gross**: everything inside it, which may also be inside another area. Use it for "how many people are in this area".
+- **Where figures must add up across areas**, each cell is given to one **primary area** by a stated precedence (`primary_area`), and the area's **unique** figure counts only its own cells. Default precedence: in force now, then the higher severity (severe, warning, alert), then a warning area before an alert area, then the smaller (more specific) area, then the lowest area code so the answer never changes. The unique figures add up to the union total.
+- **A split alternative.** Each cell is shared equally among the areas that cover it (`split`), which also adds up and treats every covering area alike.
+- **Shared.** Gross minus unique: what an area shares with a higher-precedence area. Useful to see how much of an alert area is also covered by warnings.
+- **By level in force.** For "people covered by a severe warning, a warning or only an alert", each cell takes the highest in-force level covering it. The three figures are additive and sum to the union.
+
+The same rule applies to the forecast polygons, which overlap by source and day: a cell takes the worst band, and totals are over distinct cells. Code and tests: `utils/grid100.py` (`covered_cells`, `union_total`, `primary_area`, `area_overlap_stats`).
+
+In the app, the warning areas table shows the gross figure with a small "includes people also in N other areas" note, and the top of the page and any regional or national total use the distinct-cell total.
+
 ## The score
 
 `score = 100 * hazard * (w_pop * population_percentile + w_vuln * deprivation + w_crit * critical)`, with hazard as the worse of the two bands divided by four. No hazard means no score. Defaults: population 0.4, vulnerability 0.3, critical sites 0.3 (normalised). Critical sites beyond three in one cell add nothing more. This is a judgement, so the weights are one setting and the method is written down.
