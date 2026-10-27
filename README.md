@@ -1391,7 +1391,7 @@ live in `config.py` (`TBL_EA_RT_STATIONS`, `TBL_EA_RT_STATION_MEASURES`,
   `value_in_measure_unit`. Without a number in z the row stays `unit_mismatch`, and a z of exactly 0 is taken as not set (the `z_zero_is_missing`
   widget, default true), because a gauge zero at precisely 0 mAOD is unlikely and a 0 would leave an mAOD value to be compared
   with local readings; if two sources word one unit differently, list the pair in `Thresholds/unit_aliases.csv`
-  (`threshold_unit`, `measure_unit`) and re-run. Every Type (ACTCON, RES) and Purpose is kept as a column. Status per row:
+  (`threshold_unit`, `measure_unit`) and re-run. Every Type (ACTCON, RES) and Purpose is kept as a column, and the file's label description prefix (for example `RES FW`), which the app joins to the TargetAreaID to label a threshold line (`RES FW 065FWF3007`). Status per row:
   `linked`, `linked_chosen` (several measures agree; the instantaneous one with most readings), `unit_mismatch`,
   `no_measure`, `no_gauge`, `no_family`. Output `ea_fw_threshold_gauge_links`, restricted schema.
 - **27** checks flood warning timing. For each gauge with a linked RES level (job 28: Type RES, Purpose FW, the level at which

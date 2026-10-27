@@ -53,6 +53,7 @@ COLUMN_GUESSES = {
     "category": ["category", "cat"],
     "season": ["season"],
     "z": ["z", "gaugezero", "zero"],
+    "label_prefix": ["labeldescriptionprefix", "labeldescprefix", "labelprefix", "labeldescription", "labeldesc"],
     "id": ["id", "thresholdid"],
     "name": ["fffslocname", "locationname"],
 }
@@ -86,6 +87,8 @@ def resolve_columns(raw: pd.DataFrame, columns: dict = None, basis_label: str = 
             out[field] = present[_norm(named)]
         else:
             out[field] = next((present[g] for g in guesses if g in present), None)
+    if out.get("label_prefix") is None:               # the name is not certain: any column whose name has both "label" and "prefix"
+        out["label_prefix"] = next((c for c in raw.columns if "label" in _norm(c) and "prefix" in _norm(c)), None)
     named = (columns or {}).get("basis")
     if named:
         if _norm(named) not in present:
@@ -130,6 +133,7 @@ def prepare_thresholds(raw: pd.DataFrame, columns: dict = None, basis_label: str
     df["category"] = col("category").map(clean).values
     df["season"] = col("season").map(clean).values
     df["z"] = pd.to_numeric(col("z"), errors="coerce").values
+    df["label_prefix"] = col("label_prefix").map(clean).values
     df["target_lead_minutes"] = pd.to_numeric(col("lead"), errors="coerce").values
     df["target_area"] = col("target_area").map(clean).values
     keep = (basis.str.lower() == basis_label.strip().lower()).fillna(False) & (catdesc.str.lower() == catdesc_label.strip().lower()).fillna(False)
