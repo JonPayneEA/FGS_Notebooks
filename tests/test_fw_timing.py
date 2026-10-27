@@ -102,3 +102,10 @@ def test_the_converted_value_is_the_one_used():
     links["value_in_measure_unit"] = "1.6"
     assert gauges_from_links(links).iloc[0]["res_value"] == 1.6
     assert gauges_from_links(links.drop(columns=["value_in_measure_unit"])).iloc[0]["res_value"] == 88.6
+
+
+def test_the_links_table_as_job_28_writes_it_has_no_key_column():
+    links = LINKS.drop(columns=["key"])
+    assert "key" not in links
+    g = gauges_from_links(links).set_index("fffs_id")
+    assert set(g.index) == {"130TH", "144TH"} and g.loc["130TH", "res_value"] == 1.94
