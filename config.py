@@ -343,3 +343,13 @@ MIN_CONSTITUENCIES = 600   # A refresh returning fewer than this is rejected
 # -----------------------------------------------------------------------------
 PARLIAMENT_API_BASE = "https://members-api.parliament.uk/api"
 MIN_MPS             = 600    # A refresh returning fewer than this is rejected
+
+
+# -----------------------------------------------------------------------------
+# EXPOSURE AND RISK GRID (jobs 29 onwards; plan in docs/EXPOSURE_AND_RISK_GRID_PLAN.md)
+# -----------------------------------------------------------------------------
+GRID_CELL_M = 100          # the cell size of the British National Grid layer (see utils/grid100.py; changing it changes every key)
+# The composite score per cell: hazard (worse of the rivers and sea and the surface water band) times a weighted mix of these three.
+# The weights are normalised, so only their proportions matter. The layers are always stored; the score is never the only output.
+RISK_SCORE_WEIGHTS = {"pop": 0.4, "vulnerability": 0.3, "critical": 0.3}
+RISK_SCORE_CRITICAL_CAP = 3   # critical sites in a cell beyond this add nothing more to the score
