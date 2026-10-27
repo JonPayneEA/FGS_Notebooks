@@ -167,3 +167,13 @@ def test_a_local_threshold_is_moved_up_to_an_maod_measure():
     mp = mapping(); mp.loc[mp["fffs_id"] == "0130TH", "unit_name"] = "mAOD"          # a1 is mALD 0.99, z 93.67
     out = link_thresholds(thr, mp).set_index("threshold_id")
     assert out.loc["a1", "unit_match"] == "converted" and abs(out.loc["a1", "value_in_measure_unit"] - 94.66) < 1e-9
+
+
+def test_a_z_of_zero_is_not_used_to_convert_unless_asked():
+    raw = z_file(); raw.loc[raw["ID"] == "a3", "z"] = 0.0
+    thr, _ = prepare_thresholds(raw)
+    mp = mapping(); mp.loc[mp["fffs_id"] == "0144TH", "unit_name"] = ["mASD", "mASD"]
+    out = link_thresholds(thr, mp).set_index("threshold_id")
+    assert out.loc["a3", "link_status"] == "unit_mismatch" and "z is 0" in out.loc["a3", "link_note"]
+    kept = link_thresholds(thr, mp, zero_z_is_missing=False).set_index("threshold_id")
+    assert kept.loc["a3", "unit_match"] == "converted" and kept.loc["a3", "value_in_measure_unit"] == 88.6
