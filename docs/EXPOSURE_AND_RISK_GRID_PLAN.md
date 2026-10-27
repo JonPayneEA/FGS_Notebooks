@@ -19,6 +19,7 @@ A mock-up with invented numbers, in the app's design, is in `docs/EXPOSURE_MOCKU
 
 | Decision | Choice |
 |---|---|
+| Method | **Points first, grid second.** Where address or receptor points are held, the sums are made from the points (exact point in area, band looked up at the point). The 100 m British National Grid is the aggregation and product layer, and carries the layers that have no points. |
 | Grid | 100 m British National Grid. Cell key = (northing // 100) * 10,000 + (easting // 100). |
 | Risk zones | NaFRA2 bands, rivers and sea and surface water kept separate. Flood Zones 2 and 3 added as a second view. |
 | Critical sites | All four groups: health and care, education, emergency services and prisons, utilities and hazardous sites. |
@@ -26,15 +27,25 @@ A mock-up with invented numbers, in the app's design, is in `docs/EXPOSURE_MOCKU
 | Big Environment Agency datasets | May already be governed tables, so notebooks read a table name or a file path from a widget, whichever you have. |
 | Out of scope | Scotland and Wales observed data. |
 
-## How a cell is owned
+## Units and how each number is made
 
-A polygon owns the cells whose **centre** is inside it. One rule is used for warning areas, risk bands and output areas, so every layer agrees. The error is at most half a cell (50 m) at a boundary. A polygon smaller than a cell still owns one cell, so no total is lost. Code: `utils/grid100.py` (tested on synthetic polygons).
+**The unit of truth is a point where points exist, a cell where they do not.** Either way a person is counted once, so the overlap rules below apply to both.
 
-- **Population and households.** Each output area's total is spread evenly over the cells it owns. Totals are conserved. This is an even spread, not a building-level one: in a large rural output area the people are smeared across empty cells. That is a known limit and is stated in the output table comment.
-- **Deprivation.** The LSOA decile (1 is most deprived) is given to every cell of the LSOA. Reported for an area as the population-weighted mean decile and the share of people in the most deprived 20 per cent of LSOAs.
-- **Hazard bands.** Band polygons (or raster cells) are put on the grid. Where they overlap, the worse band wins. Stored as `haz_rs` and `haz_sw`, each 0 (none) to 4 (High).
-- **Critical sites.** A point goes to the cell containing it. Stored as counts per group and in total.
-- **Warning areas.** Each area owns its cells. Its figures are sums over those cells, optionally split by band.
+**With address or receptor points** (OS AddressBase, the ONS UPRN directory, the EA National Receptor Database, subject to your licence):
+- **People and households.** Each output area's Census totals are shared among the residential address points inside it (`allocate_to_points`), so people sit where the buildings are. An output area with totals but no residential point is reported as unallocated and placed over its cells instead.
+- **Warning areas.** Exact point in polygon (`points_in_areas`). No grid, no 50 m error. This matters most for small areas.
+- **Flood bands.** Looked up at the point, separately for rivers and sea and for surface water.
+- **Deprivation.** The LSOA decile comes with the point.
+- **Properties at risk.** Counted from the points (or the NaFRA2 receptor counts where the Agency's own assessment is preferred).
+- **Critical sites.** Points in the same way.
+
+**With no points** (continuous layers, and any gap in the address data), a polygon owns the cells whose **centre** is inside it. One rule is used everywhere so layers agree, with an error of at most 50 m at a boundary. A polygon smaller than a cell owns one cell, so no total is lost. Code: `utils/grid100.py`.
+- **Hazard bands on the grid.** The cell stores the **share of its area in each band** (`band_shares_from_samples`), never "worst band wins", which would turn a cell with one patch of surface water High.
+- **Population over cells.** An output area's total is spread over its cells only where there are no points, and is labelled as an even spread in the output.
+
+**The grid** is then built by adding the points up into cells and adding the continuous layers, to give the product, the maps and the exports.
+
+**Licensing.** Address-level data is licensed. The address-level table stays in the **restricted** schema. Only aggregates (per area, per cell with small counts handled, per constituency) go to the open schema and the app, and the licence terms for a derived grid should be checked before it is shared.
 
 ## Overlapping areas
 
@@ -66,7 +77,8 @@ The same rule applies to the forecast polygons, which overlap by source and day:
 | Deprivation | English Indices of Deprivation 2025 (MHCLG, published 30 October 2025, 33,755 LSOAs) | Download by the notebook | Not comparable with 2019 |
 | Risk of Flooding from Rivers and Sea, from Surface Water (NaFRA2, January 2025) | Environment Agency | Governed table or volume file, by widget | **Format unknown**: vector or raster, to be found by the inspect step |
 | Flood Zones 2 and 3 | Environment Agency (Flood Map for Planning; only some products are open) | Governed table or volume file | Licence to confirm |
-| Properties at risk | NaFRA2 receptor counts or the National Receptor Database if you hold it | Governed table | **Needed from you**: which table |
+| Address or receptor points | OS AddressBase, the ONS UPRN directory (which gives each UPRN its output area and LSOA), or the EA National Receptor Database | Governed table, restricted schema | **You believe you have access.** Which tables, and the licence terms, to confirm |
+| Properties at risk | NaFRA2 receptor counts or the National Receptor Database | Governed table | Which table |
 | Hospitals, GP surgeries | NHS Organisation Data Service | Download | Needs postcodes turned into coordinates (ONS postcode directory) |
 | Care homes | CQC directory | Download or API | Coordinates supplied |
 | Schools, colleges | DfE Get Information About Schools | Download | Coordinates supplied |
@@ -80,26 +92,27 @@ The same rule applies to the forecast polygons, which overlap by source and day:
 
 ## Jobs and order
 
-Each is a notebook under `jobs/`, manual or run on a slow cadence, writing Delta tables in the unrestricted schema.
+Each is a notebook under `jobs/`, manual or on a slow cadence. Address-level tables go in the restricted schema; aggregates in the unrestricted one.
 
 1. **29 load_census_deprivation**: output areas, Census 2021 counts, IoD2025.
-2. **30 load_hazard_layers**: NaFRA2 and Flood Zones into a common band-by-cell table. Starts with an inspect step that prints the layers, columns and sizes, so I can adapt to what you hold.
+2. **30 load_hazard_layers**: NaFRA2 and Flood Zones, with the sampling that gives the share of a cell in each band.
 3. **31 load_critical_sites**: one standard `critical_sites` table (site id, group, type, name, coordinates, source).
-4. **32 load_responder_geographies**: combined authority, local authority, police and fire areas, and their lookups to constituencies and warning areas.
-5. **33 build_grid_100m**: the `exposure_grid_100m` table: one row per cell that holds anything.
-6. **34 warning_area_exposure**: `ea_warning_area_exposure` and a constituency roll-up, by band and source.
-7. The app: the stats on the map popups and a table of warning areas, a section of the Exports tab, and constituency figures.
+4. **32 load_responder_geographies**: combined authority, local authority, police and fire areas, and lookups.
+5. **33 build_address_points**: residential address points with output area, LSOA, deprivation decile, each warning area and flood band they fall in, and their share of the Census totals. Restricted schema.
+6. **34 build_grid_100m**: the `exposure_grid_100m` table, from the points plus the continuous layers.
+7. **35 warning_area_exposure**: `ea_warning_area_exposure` (gross and equal split), the overlap depth and pair tables, and the constituency roll-up, by band and source.
+8. The app: the Areas section, the extra lines in map popups, constituency figures and the Exports.
 
 ## What I need from you
 
-- The governed table names for NaFRA2, Flood Zones, properties at risk and any critical-site tables you hold, if they exist.
-- Whether the cluster can reach the ONS, Nomis, gov.uk, NHS and CQC sites. Job 29 prints which it could not reach.
-- A cluster big enough for the build. 100 m is about 13 million cells for England, but only cells holding anything are stored.
+- **Which point datasets you can use**, and the table names: addresses (AddressBase or the UPRN directory) and receptors (the National Receptor Database). The survey notebook searches for these names. Please also confirm the licence allows a derived exposure grid and area statistics to be shared inside the Agency.
+- The governed table names for NaFRA2, Flood Zones and any critical-site tables you hold.
+- Whether the cluster can reach the ONS, Nomis, gov.uk, NHS and CQC sites. The survey notebook reports it.
 
 ## Known limits, stated up front
 
-- Even spread of people over an output area, not building level.
-- Cell-centre ownership: a 50 m boundary error.
+- With points: an output area's people are shared equally among its residential addresses, which ignores that homes differ in size. Without points: an even spread over cells, not building level.
+- On the grid only: cell-centre ownership gives a 50 m boundary error. Point-based sums have none.
 - The band thresholds assumed are the usual ones (High above 3.3 per cent chance in any year, Medium 1 to 3.3, Low 0.1 to 1, Very Low below 0.1). Confirm against the NaFRA2 documentation.
 - Public critical site lists are incomplete for emergency services and utilities.
 - The score is a ranking aid, not a prediction.

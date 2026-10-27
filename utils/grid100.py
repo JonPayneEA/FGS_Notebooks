@@ -17,6 +17,9 @@
 #   worst_band_by_cell                 the highest band where polygons overlap
 #   band_rank                          "High", "Medium", "Low", "Very Low" (any case) to 4, 3, 2, 1; anything else 0
 #   aggregate_to_areas                 add cell columns up to areas, optionally split by a band
+#   allocate_to_points                 dasymetric: share each output area's Census totals among its address points (people where the buildings are)
+#   points_in_areas                    exact point-in-polygon: which areas each point lies in (no grid, no 50 m error)
+#   band_shares_from_samples           the share of each cell's area in each flood band, from fine samples (never "worst band wins")
 #   covered_cells / union_total        the cells covered by ANY of a set of areas, and a total over them: each person counted once
 #   primary_area                       one owning area per cell when areas overlap, by a stated precedence
 #   overlap_depth / pair_overlaps      how much areas overlap: cells by how many cover them, and each overlapping pair with its shared people
@@ -116,6 +119,59 @@ def aggregate_to_areas(grid: pd.DataFrame, area_cells: pd.DataFrame, sum_cols, b
     out = d.groupby(keys, dropna=False)[list(sum_cols)].sum().reset_index()
     out["cells"] = d.groupby(keys, dropna=False).size().to_numpy()
     return out
+
+
+# -----------------------------------------------------------------------------
+# Points first. Where address or receptor points are held, the numbers come from the points, not from spreading an output area over its
+# cells: people sit where the buildings are, a point is in a warning area or it is not (no 50 m boundary error), and a band is looked up at
+# the point. The grid is then the aggregation and product layer, and the one for continuous layers that have no points. The overlap
+# functions below work on any unit key: a point id can stand in for cell_key (call points_in_areas and rename its column).
+# -----------------------------------------------------------------------------
+
+def allocate_to_points(points: pd.DataFrame, totals: pd.DataFrame, cols, group: str = "oa"):
+    """
+    Share each group's totals (an output area's population, households, people aged 65 and over) equally among the points that belong to
+    it. `points` has `point_id` and `group` (the output area code); `totals` has `group` and the numeric `cols`. Returns (points with the
+    shares added, unallocated): `unallocated` lists groups that have totals but no points (a rural output area with no residential
+    address, say), whose people a caller must place another way, for example over the group's cells. Totals are conserved for every
+    group with at least one point.
+    """
+    n = points.groupby(group)["point_id"].transform("size").to_numpy()
+    d = points.merge(totals[[group, *cols]], on=group, how="left")
+    for c in cols:
+        d[c] = d[c].fillna(0).to_numpy() / n
+    missing = totals[~totals[group].isin(points[group].unique())][[group, *cols]].reset_index(drop=True)
+    return d, missing
+
+
+def points_in_areas(points, areas, id_col: str = "area_id", point_id: str = "point_id") -> pd.DataFrame:
+    """
+    Which areas each point lies in, exactly: a long table (point_id, area_id), one row per point and area. Both arguments are geopandas
+    GeoDataFrames in the same coordinate system (British National Grid); `points` has a `point_id`, `areas` has `id_col`. A point on a
+    boundary counts as inside.
+    """
+    import geopandas as gpd
+    j = gpd.sjoin(points[[point_id, "geometry"]], areas[[id_col, "geometry"]], how="inner", predicate="intersects")
+    return pd.DataFrame({point_id: j[point_id].to_numpy(), id_col: j[id_col].to_numpy()})
+
+
+def band_shares_from_samples(samples: pd.DataFrame, band_col: str = "band") -> pd.DataFrame:
+    """
+    The share of each cell's area in each flood band, from fine samples: a long table (cell_key, band) with one row per sample point (say a
+    10 m grid inside the cell). Returns one row per cell with share_1 to share_4 (Very Low to High), share_0 (no band) and the worst band
+    as a rank. Storing shares avoids the "one puddle makes the whole cell High" overstatement that taking the worst band causes.
+    """
+    d = samples.copy()
+    d["rank"] = d[band_col].astype(int) if pd.api.types.is_numeric_dtype(d[band_col]) else d[band_col].map(band_rank)
+    counts = d.groupby(["cell_key", "rank"]).size().unstack(fill_value=0)
+    for r in range(5):
+        if r not in counts.columns:
+            counts[r] = 0
+    counts = counts[[0, 1, 2, 3, 4]]
+    shares = counts.div(counts.sum(axis=1), axis=0)
+    shares.columns = [f"share_{r}" for r in shares.columns]
+    shares["worst_band"] = counts.apply(lambda row: max([r for r in range(5) if row[r] > 0], default=0), axis=1)
+    return shares.reset_index()
 
 
 # -----------------------------------------------------------------------------

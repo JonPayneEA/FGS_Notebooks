@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.grid100 import (  # noqa: E402
     CELL_M, aggregate_to_areas, apportion_to_cells, band_rank, cell_centre, cell_key, cell_xy, polygon_cells, polygons_to_cells,
     risk_score, worst_band_by_cell, covered_cells, union_total, primary_area, area_overlap_stats, overlap_depth, pair_overlaps,
+    allocate_to_points, points_in_areas, band_shares_from_samples,
 )
 
 
@@ -126,3 +127,34 @@ def test_the_depth_and_pairs_of_overlap_between_warning_areas_are_measured():
     w1w2 = p[(p["id_a"] == "W1") & (p["id_b"] == "W2")].iloc[0]
     assert w1w2["shared_cells"] == 2 and w1w2["population"] == 20.0 and w1w2["share_of_a"] == 0.5
     assert pair_overlaps(area_cells[area_cells["id"] == "W1"], grid, ["population"]).empty
+
+
+def test_population_is_shared_among_an_output_areas_address_points_and_totals_are_conserved():
+    pts = pd.DataFrame({"point_id": ["a", "b", "c", "d"], "oa": ["OA1", "OA1", "OA1", "OA2"]})
+    totals = pd.DataFrame({"oa": ["OA1", "OA2", "OA3"], "population": [300.0, 80.0, 40.0], "over65": [30.0, 8.0, 4.0]})
+    d, missing = allocate_to_points(pts, totals, ["population", "over65"])
+    assert d.set_index("point_id").loc["a", "population"] == 100.0 and d.set_index("point_id").loc["d", "population"] == 80.0
+    assert abs(d["population"].sum() - 380.0) < 1e-9                       # OA3 has no points: reported, not lost
+    assert list(missing["oa"]) == ["OA3"] and missing["population"].iloc[0] == 40.0
+
+
+def test_points_are_placed_in_areas_exactly_and_overlapping_areas_give_two_rows():
+    import geopandas as gpd
+    from shapely.geometry import Point
+    pts = gpd.GeoDataFrame({"point_id": ["in_a", "in_both", "out", "edge"]},
+                           geometry=[Point(5, 5), Point(15, 5), Point(50, 50), Point(10, 5)], crs=27700)
+    areas = gpd.GeoDataFrame({"area_id": ["A", "B"]}, geometry=[box(0, 0, 20, 10), box(10, 0, 30, 10)], crs=27700)
+    j = points_in_areas(pts, areas)
+    got = set(map(tuple, j[["point_id", "area_id"]].to_numpy()))
+    assert got == {("in_a", "A"), ("in_both", "A"), ("in_both", "B"), ("edge", "A"), ("edge", "B")}      # a boundary point is inside; "out" is in none
+    # the overlap rules work on points too: rename the unit column
+    unit = j.rename(columns={"point_id": "cell_key", "area_id": "id"})
+    grid = pd.DataFrame({"cell_key": ["in_a", "in_both", "edge", "out"], "population": [10.0, 20.0, 5.0, 99.0]})
+    assert union_total(grid, unit, ["population"])["population"] == 35.0
+
+
+def test_band_shares_keep_the_share_in_each_band_and_not_just_the_worst():
+    samples = pd.DataFrame({"cell_key": [1] * 10 + [2] * 4, "band": ["High"] + ["None"] * 9 + ["Low", "Low", "Medium", "Low"]})
+    s = band_shares_from_samples(samples).set_index("cell_key")
+    assert s.loc[1, "share_4"] == 0.1 and s.loc[1, "share_0"] == 0.9 and s.loc[1, "worst_band"] == 4     # one sample in ten is High
+    assert s.loc[2, "share_2"] == 0.75 and s.loc[2, "share_3"] == 0.25 and s.loc[2, "worst_band"] == 3
