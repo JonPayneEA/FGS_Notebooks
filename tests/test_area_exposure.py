@@ -11,7 +11,7 @@ from shapely.geometry import box
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.area_exposure import (  # noqa: E402
-    UNIQUE_SPLIT, VALUE_COLS, combine_tiles, constituency_with_gap, coverage_with_gap, finish_areas, point_values, site_membership, site_stats, tile_stats, to_bng_polygons,
+    UNIQUE_SPLIT, VALUE_COLS, combine_tiles, constituency_with_gap, coverage_with_gap, finish_area_geographies, finish_areas, point_values, site_membership, site_stats, tile_stats, to_bng_polygons,
 )
 from utils.grid_build import points_to_cells  # noqa: E402
 
@@ -191,3 +191,24 @@ def test_site_membership_lists_each_site_in_each_area_with_its_band_worst_first(
     assert len(m[m["name"] == "School"]) == 3                                                         # in both warnings and the alert
     assert "Far" not in set(m["name"]) and m[m["name"] == "Substation"]["band"].iloc[0] == "None"
     assert site_membership(sites.iloc[0:0], GEOMS, IDS, KINDS).empty
+
+
+def test_each_area_is_split_by_every_responder_geography_present_and_names_and_shares_are_added():
+    pts = make_points().assign(pfa=["F1", "F1", "F2", "F2", "F2", "F3"], lad=["D1"] * 6)
+    s = tile_stats(pts, GEOMS, IDS, KINDS)
+    g = s["area_geo"]
+    assert set(g.index.get_level_values("geography")) == {"constituency", "police_force_area", "local_authority_district"}      # ward, county and region columns absent: skipped
+    for geo in ("constituency", "police_force_area", "local_authority_district"):
+        assert g.xs((("flood_warning", "B", geo)), level=("kind", "area_id", "geography"))["people"].sum() == s["area"].loc[("flood_warning", "B"), "people"]
+    exposure = s["area"].reset_index()[["kind", "area_id", "people"]]
+    names = pd.DataFrame({"geography": ["police_force_area", "police_force_area"], "code": ["F1", "F2"], "name": ["Force One", "Force Two"]})
+    out = finish_area_geographies(g, exposure, names)
+    f2 = out[(out["kind"] == "flood_warning") & (out["area_id"] == "B") & (out["code"] == "F2")].iloc[0]
+    assert f2["name"] == "Force Two" and 0 < f2["share_of_area_people"] <= 1
+    assert out[out["geography"] == "local_authority_district"]["name"].isna().all()
+
+
+def test_geography_split_of_a_tile_with_no_codes_or_no_hits_is_an_empty_consistent_frame():
+    far = make_points().assign(easting=[1e6 + i for i in range(6)])
+    assert len(tile_stats(far, GEOMS, IDS, KINDS)["area_geo"]) == 0
+    assert tile_stats(make_points().drop(columns=["pcon"]), GEOMS, IDS, KINDS)["area_geo"].empty

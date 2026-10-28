@@ -382,3 +382,9 @@ All fifteen remaining items in one order. Shared dependencies appear once. Nothi
 The exposure and risk grid (`docs/EXPOSURE_AND_RISK_GRID_PLAN.md`) is being built without OS AddressBase Premium, because read access to `prd_dash_bronze.ordnance_survey_data_hub_restricted.addressbase_premium` is not yet granted. Access needs the Access Approver's agreement and a MyIT "Access to restricted data" request.
 
 Granting it would give critical sites from one national classification (health, education, emergency services, utilities) in place of the patchier interim sources, and a residential and non-residential split for population and homes at risk. The pipeline switches with one widget and no downstream change. This is the largest single quality gain available to the exposure work.
+
+## Future improvement: fire and rescue and combined authorities in the warning area responder table
+
+Job 35 now splits every flood warning and flood alert area by district, county or unitary authority, ward, constituency, police force area and region (`ea_area_geographies`), because each address point carries those codes from the National Statistics UPRN Lookup. Fire and rescue authorities and combined authorities are not in the NSUL, so they are not in that table yet.
+
+They can be added with no new data collection. Job 32 already builds both: combined authorities and fire authorities by rolling district codes up through the ONS lookups, and fire and rescue authorities also by assigning each point to a boundary polygon. Adding them to the area table is one more split in job 35, using the same rollup, and a row in the app's "Who responds" panel. It waits on job 32 being run with `combined_authority_csv` and `fra_geojson` set, and on checking that the fire authority polygon assignment places nearly every point.
