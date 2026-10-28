@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.critical_sites import (  # noqa: E402
-    COLUMNS, classify_osm, dedupe_nearby, fetch_ods_role, gias_sites, normalise_postcode, ods_sites, osm_sites, standardise,
+    COLUMNS, classify_osm, dedupe_nearby, fetch_ods_role, gias_sites, keep_hospitals, normalise_postcode, ods_sites, osm_sites, standardise,
 )
 
 
@@ -177,3 +177,19 @@ def test_the_first_attempt_succeeds_now_that_paging_starts_at_one():
     get = make_get(lambda h, p: True, total=1500)
     orgs, label = fetch_ods_role(get, "RO198")
     assert label == "_format=json" and len(orgs) == 1500 and get.calls[0][0]["Offset"] == 1
+
+
+def test_a_role_can_be_a_dict_of_search_parameters_and_the_parameters_are_sent():
+    get = make_get(lambda h, p: p.get("NonPrimaryRoleId") == "RO76" and "PrimaryRoleId" not in p, total=10)
+    orgs, label = fetch_ods_role(get, {"NonPrimaryRoleId": "RO76"})
+    assert len(orgs) == 10 and get.calls[0][0]["NonPrimaryRoleId"] == "RO76"
+
+
+def test_trust_sites_are_cut_down_to_hospital_type_names_and_gp_practices_are_left_alone():
+    rows = [("NHS trust site", n) for n in ["LEEDS GENERAL INFIRMARY", "ST JAMES'S UNIVERSITY HOSPITAL", "WARD 7 ANNEX", "NORTHGATE HEALTH CENTRE",
+                                              "KINGS A&E DEPARTMENT", "TRUST HEADQUARTERS", "OAKWOOD URGENT TREATMENT CENTRE"]] + [("GP practice", "ALPHA SURGERY")]
+    d = pd.DataFrame({"site_id": "", "site_group": "health", "site_type": [r[0] for r in rows], "name": [r[1] for r in rows], "easting": 1.0, "northing": 1.0,
+                      "postcode": "", "source": "nhs_ods", "source_id": [str(i) for i in range(len(rows))]})
+    out = keep_hospitals(d)
+    assert sorted(out["name"]) == sorted(["LEEDS GENERAL INFIRMARY", "ST JAMES'S UNIVERSITY HOSPITAL", "KINGS A&E DEPARTMENT", "OAKWOOD URGENT TREATMENT CENTRE", "ALPHA SURGERY"])
+    assert set(out.loc[out["name"] != "ALPHA SURGERY", "site_type"]) == {"hospital"} and out.loc[out["name"] == "ALPHA SURGERY", "site_type"].iloc[0] == "GP practice"
