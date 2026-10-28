@@ -50,6 +50,27 @@ def _total_column(df: pd.DataFrame, prefer: str = "total") -> str:
     return cand[0]
 
 
+def _value_columns(df: pd.DataFrame) -> list:
+    return [c for c in df.columns if "geography" not in str(c).lower() and str(c).lower() != "date"]
+
+
+def _households_column(df: pd.DataFrame) -> str:
+    """The households count. Census table ts041 has one value column, named 'Number of households: Number of households; measures: Value',
+    with no 'Total' in it; an older layout had 'Number of households: Total'. Prefer a Total, then the households column, then the only
+    value column."""
+    try:
+        return _total_column(df)
+    except ValueError:
+        pass
+    cand = [c for c in _value_columns(df) if "household" in str(c).lower()]
+    if cand:
+        return cand[0]
+    vals = _value_columns(df)
+    if len(vals) == 1:
+        return vals[0]
+    raise ValueError(f"No households column. Columns present: {list(df.columns)[:10]}")
+
+
 def age65plus_columns(df: pd.DataFrame) -> list:
     """The age-band columns for 65 and over: 'Aged 65 to 69 years' up to 'Aged 85 years and over'."""
     out = []
@@ -88,10 +109,10 @@ def census_oa_table(ts001: pd.DataFrame, ts007a: pd.DataFrame, ts041: pd.DataFra
         pass
     out = out.merge(age, on="oa", how="left")
     if ts041 is not None:
-        h = ts041[[_code_column(ts041), _total_column(ts041)]].copy()
+        h = ts041[[_code_column(ts041), _households_column(ts041)]].copy()
         h.columns = ["oa", "households"]
         out = out.merge(h, on="oa", how="left")
-        rep["households_column"] = _total_column(ts041)
+        rep["households_column"] = _households_column(ts041)
     else:
         out["households"] = float("nan")
     if "age_total" in out:
