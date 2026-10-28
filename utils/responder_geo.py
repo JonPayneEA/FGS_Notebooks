@@ -26,6 +26,23 @@ GEOGRAPHIES = {
 LOOKUP_GEOGRAPHIES = ("fire_and_rescue_authority", "combined_authority")
 
 
+def fill_missing_names(names: pd.DataFrame, geography: str, sources) -> pd.DataFrame:
+    """Add names for codes of `geography` that `names` (geography, code, name, source) does not name, taking them from `sources`, an ordered list of
+    (frame with code and name, label). A code already named is never changed; an earlier source wins over a later one. The NSUL county file names
+    counties only, so unitary and metropolitan authority codes, which sit in the same column, come from the boundary file or the district names."""
+    have = set(names.loc[names["geography"] == geography, "code"].astype(str))
+    add = []
+    for frame, label in sources:
+        if frame is None or not len(frame):
+            continue
+        f = frame[["code", "name"]].astype(str).drop_duplicates("code")
+        f = f[~f["code"].isin(have)]
+        if len(f):
+            add.append(f.assign(geography=geography, source=label))
+            have |= set(f["code"])
+    return pd.concat([names] + add, ignore_index=True)[["geography", "code", "name", "source"]] if add else names
+
+
 def _as_at(name: str) -> int:
     """'... as at 05_25.csv' -> 202505 (for choosing the latest of several); 0 if there is no date."""
     m = re.search(r"as at (\d{2})_(\d{2})", name, flags=re.I)

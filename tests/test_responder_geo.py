@@ -84,3 +84,17 @@ def test_points_take_the_polygon_they_are_in_then_the_nearest_within_a_limit():
     assert nearest == 1
     idx2, _ = assign_points_to_polygons([700], [100], polys)
     assert idx2[0] == 0                              # in polygons 0 and 2: the lower index wins
+
+
+def test_missing_county_names_are_filled_from_later_sources_without_changing_the_named_ones():
+    from utils.responder_geo import fill_missing_names
+    names = pd.DataFrame({"geography": ["county_or_unitary", "region"], "code": ["E10000003", "E12000001"], "name": ["Cambridgeshire", "North East"], "source": ["nsul", "nsul"]})
+    boundary = pd.DataFrame({"code": ["E10000003", "E06000001"], "name": ["WRONG", "Hartlepool"]})
+    districts = pd.DataFrame({"code": ["E06000001", "E08000001"], "name": ["Hartlepool district", "Bolton"]})
+    out = fill_missing_names(names, "county_or_unitary", [(boundary, "boundary"), (districts, "district names")])
+    got = out[out["geography"] == "county_or_unitary"].set_index("code")
+    assert got.loc["E10000003", "name"] == "Cambridgeshire"                                    # named already: untouched
+    assert got.loc["E06000001", "name"] == "Hartlepool" and got.loc["E06000001", "source"] == "boundary"        # earlier source wins
+    assert got.loc["E08000001", "name"] == "Bolton" and got.loc["E08000001", "source"] == "district names"
+    assert len(out[out["geography"] == "region"]) == 1
+    assert fill_missing_names(names, "county_or_unitary", [(None, "x"), (pd.DataFrame(columns=["code", "name"]), "y")]).equals(names)
