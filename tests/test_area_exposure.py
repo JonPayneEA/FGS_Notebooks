@@ -157,3 +157,26 @@ def test_a_tile_where_no_point_falls_in_any_area_still_gives_consistent_empty_fr
     both = combine_tiles([s["area"], tile_stats(make_points(), GEOMS, IDS, KINDS)["area"]], None)
     assert both.loc[("flood_warning", "A"), "people"] == 12
     assert coverage_with_gap(combine_tiles([s["coverage"], tile_stats(make_points(), GEOMS, IDS, KINDS)["coverage"]], None)).set_index("kind").loc["flood_warning", "people"] == 30
+
+
+def test_a_geos_error_while_repairing_one_polygon_falls_back_and_never_stops_the_run(monkeypatch):
+    pytest.importorskip("pyproj")
+    bowtie = '{"type":"Polygon","coordinates":[[[-1.56,53.79],[-1.54,53.81],[-1.54,53.79],[-1.56,53.81],[-1.56,53.79]]]}'
+    good = '{"type":"Polygon","coordinates":[[[-1.56,53.79],[-1.54,53.79],[-1.54,53.81],[-1.56,53.81],[-1.56,53.79]]]}'
+
+    def boom(g):
+        raise shapely.errors.GEOSException("IllegalArgumentException: Overlay input is mixed-dimension")
+
+    monkeypatch.setattr(shapely, "make_valid", boom)
+    geoms, status = to_bng_polygons([bowtie, good])
+    assert status == ["ok", "ok"] and geoms[0].is_valid and geoms[0].area > 0           # the bowtie was repaired by buffer(0) instead
+    monkeypatch.setattr(shapely.geometry.base.BaseGeometry, "buffer", lambda self, *a, **k: (_ for _ in ()).throw(shapely.errors.GEOSException("also fails")))
+    geoms, status = to_bng_polygons([bowtie, good])
+    assert status == ["could not be repaired", "ok"] and geoms[0] is None and geoms[1] is not None
+
+
+def test_a_repair_that_leaves_only_a_line_is_reported_not_returned_as_a_polygon():
+    pytest.importorskip("pyproj")
+    collapsed = '{"type":"Polygon","coordinates":[[[-1.6,53.7],[-1.6,53.7],[-1.6,53.7],[-1.6,53.7]]]}'      # every point the same: no area
+    geoms, status = to_bng_polygons([collapsed])
+    assert status[0] != "ok" and geoms[0] is None

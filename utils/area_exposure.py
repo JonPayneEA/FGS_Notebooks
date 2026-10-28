@@ -65,9 +65,40 @@ def point_values(points: pd.DataFrame) -> pd.DataFrame:
     return d[VALUE_COLS]
 
 
+def _polygonal_parts(g):
+    """Every non-empty Polygon inside a geometry of any kind (recursing through multi-part geometries and collections)."""
+    if g is None or g.is_empty:
+        return []
+    if g.geom_type == "Polygon":
+        return [g]
+    if g.geom_type in ("MultiPolygon", "GeometryCollection"):
+        return [p for member in g.geoms for p in _polygonal_parts(member)]
+    return []
+
+
+def _repair(g):
+    """(valid polygon or multipolygon, reason) from a possibly invalid polygon. make_valid first; if it fails or leaves nothing polygonal (GEOS
+    versions differ: some raise 'Overlay input is mixed-dimension' on malformed input), buffer(0). The parts of a make_valid result do not overlap,
+    so they are assembled directly, with no overlay. The reason, when there is no polygon, is 'empty after repair' (a repair ran and left no area:
+    a collapsed polygon) or 'could not be repaired' (every repair raised an error)."""
+    if g.is_valid:
+        return g, "ok"
+    ran = False
+    for fix in (shapely.make_valid, lambda x: x.buffer(0)):
+        try:
+            parts = _polygonal_parts(fix(g))
+        except Exception:
+            continue
+        ran = True
+        if parts:
+            return (parts[0] if len(parts) == 1 else shapely.MultiPolygon(parts)), "ok"
+    return None, ("empty after repair" if ran else "could not be repaired")
+
+
 def to_bng_polygons(geojson_texts, source_epsg: int = 4326):
-    """GeoJSON text (WGS84 unless `source_epsg` says otherwise) -> (polygons in British National Grid, status) per input. status is 'ok', 'no geometry', 'not a polygon' (a line or point:
-    it has no area to count addresses in) or 'empty after repair'. Invalid polygons are repaired, and only the polygonal part is kept."""
+    """GeoJSON text (WGS84 unless `source_epsg` says otherwise) -> (polygons in British National Grid, status) per input. status is 'ok', 'no geometry',
+    'not a polygon' (a line or point: it has no area to count addresses in), 'empty after repair' or 'could not be repaired'. Invalid polygons are
+    repaired one at a time, so one bad polygon cannot stop the run, and only the polygonal part is kept."""
     from pyproj import Transformer
     tr = Transformer.from_crs(source_epsg, 27700, always_xy=True) if source_epsg != 27700 else None
     out, status = [], []
@@ -82,14 +113,13 @@ def to_bng_polygons(geojson_texts, source_epsg: int = 4326):
             out.append(None); status.append("no geometry"); continue
         if g.geom_type not in ("Polygon", "MultiPolygon"):
             out.append(None); status.append("not a polygon"); continue
-        if tr is not None:
-            g = shapely.transform(g, lambda c: np.column_stack(tr.transform(c[:, 0], c[:, 1])))
-        if not g.is_valid:
-            g = shapely.make_valid(g)
-        parts = [p for p in shapely.get_parts(g) if p.geom_type in ("Polygon", "MultiPolygon") and not p.is_empty]
-        if not parts:
-            out.append(None); status.append("empty after repair"); continue
-        out.append(shapely.union_all(parts) if len(parts) > 1 else parts[0]); status.append("ok")
+        try:
+            if tr is not None:
+                g = shapely.transform(g, lambda c: np.column_stack(tr.transform(c[:, 0], c[:, 1])))
+            fixed, why = _repair(g)
+        except Exception:
+            out.append(None); status.append("could not be repaired"); continue
+        out.append(fixed); status.append(why)
     return out, status
 
 
