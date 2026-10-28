@@ -65,11 +65,11 @@ def point_values(points: pd.DataFrame) -> pd.DataFrame:
     return d[VALUE_COLS]
 
 
-def to_bng_polygons(geojson_texts):
-    """GeoJSON text in WGS84 -> (polygons in British National Grid, status) per input. status is 'ok', 'no geometry', 'not a polygon' (a line or point:
+def to_bng_polygons(geojson_texts, source_epsg: int = 4326):
+    """GeoJSON text (WGS84 unless `source_epsg` says otherwise) -> (polygons in British National Grid, status) per input. status is 'ok', 'no geometry', 'not a polygon' (a line or point:
     it has no area to count addresses in) or 'empty after repair'. Invalid polygons are repaired, and only the polygonal part is kept."""
     from pyproj import Transformer
-    tr = Transformer.from_crs(4326, 27700, always_xy=True)
+    tr = Transformer.from_crs(source_epsg, 27700, always_xy=True) if source_epsg != 27700 else None
     out, status = [], []
     for t in geojson_texts:
         if t is None or not isinstance(t, str) or not t.strip():
@@ -82,7 +82,8 @@ def to_bng_polygons(geojson_texts):
             out.append(None); status.append("no geometry"); continue
         if g.geom_type not in ("Polygon", "MultiPolygon"):
             out.append(None); status.append("not a polygon"); continue
-        g = shapely.transform(g, lambda c: np.column_stack(tr.transform(c[:, 0], c[:, 1])))
+        if tr is not None:
+            g = shapely.transform(g, lambda c: np.column_stack(tr.transform(c[:, 0], c[:, 1])))
         if not g.is_valid:
             g = shapely.make_valid(g)
         parts = [p for p in shapely.get_parts(g) if p.geom_type in ("Polygon", "MultiPolygon") and not p.is_empty]

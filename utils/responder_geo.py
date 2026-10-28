@@ -72,3 +72,84 @@ def rollup_through_lookup(by_district: pd.DataFrame, lookup: pd.DataFrame, value
     g = m.groupby(["geography", "geography_code", "geography_name"], as_index=False)[list(value_cols)].sum()
     n = m.groupby(["geography", "geography_code", "geography_name"]).size().rename("districts").reset_index()
     return g.merge(n, on=["geography", "geography_code", "geography_name"])
+
+
+def read_csv_text(path_or_buffer, **kw) -> pd.DataFrame:
+    """Read a reference CSV as text. UTF-8 with or without a byte order mark first (the ONS files carry one, which otherwise shows up as 'i>?' in the
+    first column name and mangles accents such as Ynys Mon with a circumflex), then Latin-1 if the file is not UTF-8."""
+    for enc in ("utf-8-sig", "latin-1"):
+        try:
+            if hasattr(path_or_buffer, "seek"):
+                path_or_buffer.seek(0)
+            return pd.read_csv(path_or_buffer, dtype=str, encoding=enc, **kw)
+        except UnicodeDecodeError:
+            continue
+    raise UnicodeDecodeError("utf-8-sig/latin-1", b"", 0, 1, "could not decode the file")
+
+
+def parse_district_lookup(df: pd.DataFrame, geography: str) -> pd.DataFrame:
+    """A raw ONS lookup of local authority districts to a bigger geography (fire and rescue authority, combined authority) in the layout the
+    roll-up needs: district_code, geography, geography_code, geography_name. The district column is the one named LAD..CD, the geography code is
+    another column ending CD, and its name is the matching column ending NM (a Welsh NMW column is ignored). A district with no geography
+    (blank code) is dropped: it is in none."""
+    cols = [str(c).replace("\ufeff", "").strip() for c in df.columns]
+    d = df.copy()
+    d.columns = cols
+    lad = next((c for c in cols if re.fullmatch(r"LAD\d*CD", c, re.I)), None)
+    other_cd = [c for c in cols if re.search(r"CD$", c, re.I) and c != lad]
+    if lad is None or not other_cd:
+        raise ValueError(f"Expected a district column (LAD..CD) and a geography code column (..CD); found {cols[:8]}")
+    code_col = other_cd[0]
+    stem = re.sub(r"\d*CD$", "", code_col, flags=re.I)
+    name_col = next((c for c in cols if re.fullmatch(stem + r"\d*NM", c, re.I)), None)
+    if name_col is None:
+        raise ValueError(f"No name column for {code_col}: expected {stem}..NM among {cols[:8]}")
+    out = pd.DataFrame({"district_code": d[lad].astype(str).str.strip(), "geography": geography,
+                        "geography_code": d[code_col].astype(str).str.strip(), "geography_name": d[name_col].astype(str).str.strip()})
+    return out[out["geography_code"].notna() & ~out["geography_code"].isin(["", "nan", "None"])].drop_duplicates(["district_code", "geography_code"]).reset_index(drop=True)
+
+
+def read_geojson_features(text: str):
+    """A GeoJSON FeatureCollection as (a frame of the properties plus a `geometry` column of GeoJSON text per feature, the EPSG code). The code is 4326
+    unless the file names another coordinate system (an old-style 'crs' member, as in files exported in British National Grid, 27700)."""
+    import json
+    j = json.loads(text)
+    if j.get("type") != "FeatureCollection":
+        raise ValueError("Expected a GeoJSON FeatureCollection.")
+    epsg = 4326
+    name = str(((j.get("crs") or {}).get("properties") or {}).get("name", ""))
+    m = re.search(r"(\d{4,5})\s*$", name)
+    if m:
+        epsg = int(m.group(1))
+    rows = []
+    for f in j.get("features", []):
+        r = dict(f.get("properties") or {})
+        r["geometry"] = json.dumps(f["geometry"]) if f.get("geometry") else None
+        rows.append(r)
+    return pd.DataFrame(rows), epsg
+
+
+def assign_points_to_polygons(x, y, polys, max_nearest_m: float = 2000.0):
+    """For each point, the index of the polygon it lies in, or, if it lies in none (a coastal point just outside a boundary clipped to the coast),
+    the nearest polygon within `max_nearest_m`; -1 if there is none. A point in two overlapping polygons takes the lower index. Returns an int array
+    and the number of points placed by the nearest fallback.
+    Built for boundaries with very many vertices (an authority boundary at full resolution): each polygon is prepared once, and only the points inside
+    its bounding box that no earlier polygon has taken are tested against it."""
+    import numpy as np
+    import shapely
+    x, y = np.asarray(x, dtype="float64"), np.asarray(y, dtype="float64")
+    out = np.full(len(x), -1, dtype="int64")
+    for k, poly in enumerate(polys):
+        minx, miny, maxx, maxy = poly.bounds
+        cand = np.flatnonzero((out < 0) & (x >= minx) & (x <= maxx) & (y >= miny) & (y <= maxy))
+        if len(cand):
+            inside = shapely.contains_xy(poly, x[cand], y[cand])
+            out[cand[inside]] = k
+    missing = np.flatnonzero(out < 0)
+    nearest = 0
+    if len(missing):
+        tree = shapely.STRtree(np.asarray(polys, dtype=object))
+        ni, dist = tree.query_nearest(shapely.points(x[missing], y[missing]), return_distance=True, all_matches=False, max_distance=max_nearest_m)
+        out[missing[ni[0]]] = ni[1]
+        nearest = int(len(ni[0]))
+    return out, nearest
