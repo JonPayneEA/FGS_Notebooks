@@ -72,3 +72,38 @@ def rollup_through_lookup(by_district: pd.DataFrame, lookup: pd.DataFrame, value
     g = m.groupby(["geography", "geography_code", "geography_name"], as_index=False)[list(value_cols)].sum()
     n = m.groupby(["geography", "geography_code", "geography_name"]).size().rename("districts").reset_index()
     return g.merge(n, on=["geography", "geography_code", "geography_name"])
+
+
+def read_csv_text(path_or_buffer, **kw) -> pd.DataFrame:
+    """Read a reference CSV as text. UTF-8 with or without a byte order mark first (the ONS files carry one, which otherwise shows up as 'i>?' in the
+    first column name and mangles accents such as Ynys Mon with a circumflex), then Latin-1 if the file is not UTF-8."""
+    for enc in ("utf-8-sig", "latin-1"):
+        try:
+            if hasattr(path_or_buffer, "seek"):
+                path_or_buffer.seek(0)
+            return pd.read_csv(path_or_buffer, dtype=str, encoding=enc, **kw)
+        except UnicodeDecodeError:
+            continue
+    raise UnicodeDecodeError("utf-8-sig/latin-1", b"", 0, 1, "could not decode the file")
+
+
+def parse_district_lookup(df: pd.DataFrame, geography: str) -> pd.DataFrame:
+    """A raw ONS lookup of local authority districts to a bigger geography (fire and rescue authority, combined authority) in the layout the
+    roll-up needs: district_code, geography, geography_code, geography_name. The district column is the one named LAD..CD, the geography code is
+    another column ending CD, and its name is the matching column ending NM (a Welsh NMW column is ignored). A district with no geography
+    (blank code) is dropped: it is in none."""
+    cols = [str(c).replace("\ufeff", "").strip() for c in df.columns]
+    d = df.copy()
+    d.columns = cols
+    lad = next((c for c in cols if re.fullmatch(r"LAD\d*CD", c, re.I)), None)
+    other_cd = [c for c in cols if re.search(r"CD$", c, re.I) and c != lad]
+    if lad is None or not other_cd:
+        raise ValueError(f"Expected a district column (LAD..CD) and a geography code column (..CD); found {cols[:8]}")
+    code_col = other_cd[0]
+    stem = re.sub(r"\d*CD$", "", code_col, flags=re.I)
+    name_col = next((c for c in cols if re.fullmatch(stem + r"\d*NM", c, re.I)), None)
+    if name_col is None:
+        raise ValueError(f"No name column for {code_col}: expected {stem}..NM among {cols[:8]}")
+    out = pd.DataFrame({"district_code": d[lad].astype(str).str.strip(), "geography": geography,
+                        "geography_code": d[code_col].astype(str).str.strip(), "geography_name": d[name_col].astype(str).str.strip()})
+    return out[out["geography_code"].notna() & ~out["geography_code"].isin(["", "nan", "None"])].drop_duplicates(["district_code", "geography_code"]).reset_index(drop=True)
