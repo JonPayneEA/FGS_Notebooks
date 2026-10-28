@@ -356,6 +356,11 @@ HAZARD_RASTER_DIR = f"/Volumes/{CATALOG}/{SCHEMA}/{EXTERNAL_VOLUME}/hazard_raste
 TBL_ADDRESS_POINTS = f"{CATALOG}.{RESTRICTED_SCHEMA}.exposure_address_points"   # job 33: one row per England UPRN (restricted schema): Census shares, deprivation, flood band ranks
 TBL_CRITICAL_SITES = f"{CATALOG}.{RESTRICTED_SCHEMA}.critical_sites"                  # job 31 (not yet built): one row per site; job 34 counts it per cell if it exists
 TBL_EXPOSURE_GRID  = f"{CATALOG}.{RESTRICTED_SCHEMA}.exposure_grid_100m"              # job 34: one row per 100 m cell with people, exposure, band shares, critical sites and the score
+TBL_AREA_EXPOSURE       = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_area_exposure"             # job 35: one row per flood warning or alert area: gross, unique and split people by band, deprivation, critical sites
+TBL_AREA_OVERLAPS       = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_area_overlaps"             # job 35: each pair of areas of one kind that share addresses, with what they share
+TBL_AREA_CONST_EXPOSURE = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_area_constituency_exposure" # job 35: each area split by constituency (addresses, people, people in High or Medium)
+TBL_AREA_COVERAGE       = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_area_coverage"             # job 35: distinct people covered by any warning (or alert) area, against all, so the gap is visible
+TBL_CONST_EXPOSURE      = f"{CATALOG}.{RESTRICTED_SCHEMA}.constituency_flood_exposure"  # job 35: per constituency, people by band and how many are in a warning or alert area
 GRID_CELL_M = 100          # the cell size of the British National Grid layer (see utils/grid100.py; changing it changes every key)
 # The composite score per cell: hazard (worse of the rivers and sea and the surface water band) times a weighted mix of these three.
 # The weights are normalised, so only their proportions matter. The layers are always stored; the score is never the only output.
