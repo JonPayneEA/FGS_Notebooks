@@ -11,7 +11,7 @@ from shapely.geometry import box
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.area_exposure import (  # noqa: E402
-    UNIQUE_SPLIT, VALUE_COLS, combine_tiles, constituency_with_gap, coverage_with_gap, finish_area_geographies, finish_areas, point_values, site_membership, site_stats, tile_stats, to_bng_polygons,
+    UNIQUE_SPLIT, VALUE_COLS, combine_tiles, constituency_with_gap, coverage_with_gap, finish_area_geographies, finish_areas, load_tile_checkpoint, save_tile_checkpoint, tile_signature, point_values, site_membership, site_stats, tile_stats, to_bng_polygons,
 )
 from utils.grid_build import points_to_cells  # noqa: E402
 
@@ -212,3 +212,22 @@ def test_geography_split_of_a_tile_with_no_codes_or_no_hits_is_an_empty_consiste
     far = make_points().assign(easting=[1e6 + i for i in range(6)])
     assert len(tile_stats(far, GEOMS, IDS, KINDS)["area_geo"]) == 0
     assert tile_stats(make_points().drop(columns=["pcon"]), GEOMS, IDS, KINDS)["area_geo"].empty
+
+
+def test_tile_checkpoint_round_trips_and_refuses_results_made_from_something_else(tmp_path):
+    areas = pd.DataFrame({"kind": ["flood_warning", "flood_alert"], "area_id": ["A", "C"]})
+    tiles = pd.DataFrame({"tile": ["SE00", "SE05"], "count": [10, 20]})
+    sig = tile_signature(areas, tiles)
+    results = [tile_stats(make_points(), GEOMS, IDS, KINDS)]
+    path = str(tmp_path / "sub" / "tiles.pkl")
+    assert load_tile_checkpoint(path, sig)[2] == "no saved results at that path"
+    save_tile_checkpoint(path, results, [{"tile": "SE00", "status": "done"}], sig)
+    got, log, why = load_tile_checkpoint(path, sig)
+    assert why == "" and log == [{"tile": "SE00", "status": "done"}]
+    assert np.allclose(combine_tiles([r["area"] for r in got], None)["people"], combine_tiles([r["area"] for r in results], None)["people"])
+    # the same areas in another order are the same signature; a new area, or a changed point count, is not
+    assert tile_signature(areas.iloc[::-1], tiles) == sig
+    assert load_tile_checkpoint(path, tile_signature(areas.assign(area_id=["A", "D"]), tiles))[0] is None
+    assert "address points have changed" in load_tile_checkpoint(path, tile_signature(areas, tiles.assign(count=[10, 21])))[2]
+    open(path, "wb").write(b"not a pickle")
+    assert load_tile_checkpoint(path, sig)[0] is None
