@@ -132,23 +132,24 @@ def read_geojson_features(text: str):
 def assign_points_to_polygons(x, y, polys, max_nearest_m: float = 2000.0):
     """For each point, the index of the polygon it lies in, or, if it lies in none (a coastal point just outside a boundary clipped to the coast),
     the nearest polygon within `max_nearest_m`; -1 if there is none. A point in two overlapping polygons takes the lower index. Returns an int array
-    and the number of points placed by the nearest fallback."""
+    and the number of points placed by the nearest fallback.
+    Built for boundaries with very many vertices (an authority boundary at full resolution): each polygon is prepared once, and only the points inside
+    its bounding box that no earlier polygon has taken are tested against it."""
     import numpy as np
     import shapely
-    tree = shapely.STRtree(np.asarray(polys, dtype=object))
-    pts = shapely.points(np.asarray(x, dtype="float64"), np.asarray(y, dtype="float64"))
-    out = np.full(len(pts), -1, dtype="int64")
-    pi, gi = tree.query(pts, predicate="intersects")
-    # query returns pairs in ascending point order; keep the first (lowest polygon index) per point
-    order = np.lexsort((gi, pi))
-    pi, gi = pi[order], gi[order]
-    first = np.r_[True, pi[1:] != pi[:-1]]
-    out[pi[first]] = gi[first]
+    x, y = np.asarray(x, dtype="float64"), np.asarray(y, dtype="float64")
+    out = np.full(len(x), -1, dtype="int64")
+    for k, poly in enumerate(polys):
+        minx, miny, maxx, maxy = poly.bounds
+        cand = np.flatnonzero((out < 0) & (x >= minx) & (x <= maxx) & (y >= miny) & (y <= maxy))
+        if len(cand):
+            inside = shapely.contains_xy(poly, x[cand], y[cand])
+            out[cand[inside]] = k
     missing = np.flatnonzero(out < 0)
     nearest = 0
     if len(missing):
-        ni, dist = tree.query_nearest(pts[missing], return_distance=True, all_matches=False)
-        ok = dist <= max_nearest_m
-        out[missing[ni[0][ok]]] = ni[1][ok]
-        nearest = int(ok.sum())
+        tree = shapely.STRtree(np.asarray(polys, dtype=object))
+        ni, dist = tree.query_nearest(shapely.points(x[missing], y[missing]), return_distance=True, all_matches=False, max_distance=max_nearest_m)
+        out[missing[ni[0]]] = ni[1]
+        nearest = int(len(ni[0]))
     return out, nearest
