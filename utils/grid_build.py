@@ -131,13 +131,45 @@ def build_grid(people: pd.DataFrame, shares: pd.DataFrame, critical: pd.DataFram
     return g
 
 
-def add_score(grid: pd.DataFrame, weights: dict, crit_cap: int = 3, include_surface: bool = False) -> pd.DataFrame:
-    """Add pop_pct (the cell's population as a national percentile among populated cells) and risk_score (see grid100.risk_score). Run on
-    the whole of England at once: a percentile over one tile would not be national."""
+def national_percentile(values, all_values) -> np.ndarray:
+    """The percentile rank of each of `values` among `all_values` (every cell in England, zeros included), the same as pandas
+    Series.rank(pct=True) with average ranks. Lets each tile be scored on its own, against the whole country, without joining the tiles."""
+    allv = np.sort(np.asarray(all_values, dtype="float64"))
+    v = np.asarray(values, dtype="float64")
+    less = np.searchsorted(allv, v, side="left")
+    leq = np.searchsorted(allv, v, side="right")
+    return (less + (leq - less + 1) / 2.0) / len(allv)
+
+
+def add_score(grid: pd.DataFrame, weights: dict, crit_cap: int = 3, include_surface: bool = False, all_people=None) -> pd.DataFrame:
+    """Add pop_pct (the cell's population as a national percentile) and risk_score (see grid100.risk_score). The percentile must be national:
+    either run this on the whole of England at once, or pass `all_people`, the people of every cell in England, and score one tile at a time."""
     g = grid.copy()
     pop = pd.to_numeric(g["people"], errors="coerce").fillna(0)
-    g["pop_pct"] = pop.rank(pct=True).where(pop > 0, 0.0).round(4)
+    if all_people is None:
+        pct = pop.rank(pct=True)
+    else:
+        pct = pd.Series(national_percentile(pop.to_numpy(), all_people), index=g.index)
+    g["pop_pct"] = pct.where(pop > 0, 0.0).round(4)
     # grid100.risk_score reads the population from a column named "population"; the grid calls it "people". Without this mapping the
     # population term silently counted as zero (a missing column is zero), and every flooded deprived cell scored the same.
-    g["risk_score"] = risk_score(g.assign(population=pop), weights, crit_cap, include_surface)
+    # It ranks the population itself, so for a tile scored alone the national percentile is swapped in for it afterwards.
+    if all_people is None:
+        g["risk_score"] = risk_score(g.assign(population=pop), weights, crit_cap, include_surface)
+    else:
+        g["risk_score"] = _score_with_percentile(g, pop, weights, crit_cap, include_surface)
     return g
+
+
+def _score_with_percentile(g, pop, weights, crit_cap, include_surface):
+    """The composite score with a ready-made population percentile (the same formula as grid100.risk_score)."""
+    def col(name):
+        return pd.to_numeric(g[name], errors="coerce").fillna(0) if name in g else pd.Series(0.0, index=g.index)
+    w = {k: float(weights.get(k, 0)) for k in ("pop", "vulnerability", "critical")}
+    total = sum(w.values()) or 1.0
+    haz = (np.maximum(col("haz_rs"), col("haz_sw")) if include_surface else col("haz_rs")).clip(0, 4) / 4.0
+    dec = col("imd_decile")
+    vuln = ((11 - dec) / 10.0).where(dec > 0, 0.0)
+    crit = col("critical_sites").clip(0, crit_cap) / float(crit_cap)
+    inner = (w["pop"] * g["pop_pct"].where(pop > 0, 0.0) + w["vulnerability"] * vuln + w["critical"] * crit) / total
+    return (100.0 * haz * inner).round(2)

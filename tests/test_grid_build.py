@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.grid_build import add_score, build_grid, critical_to_cells, points_to_cells, shares_wide  # noqa: E402
+from utils.grid_build import add_score, build_grid, critical_to_cells, national_percentile, points_to_cells, shares_wide  # noqa: E402
 from utils.grid100 import cell_key  # noqa: E402
 
 K1, K2 = int(cell_key(500050, 100050)), int(cell_key(500150, 100050))
@@ -96,3 +96,21 @@ def test_more_people_scores_higher_when_hazard_and_deprivation_are_equal():
     out = add_score(g, {"pop": 0.4, "vulnerability": 0.3, "critical": 0.3}).set_index("cell_key")["risk_score"]
     assert out[1] < out[2] < out[3]
     assert out[3] > 30                                                    # more than hazard times deprivation alone
+
+
+def test_scoring_one_tile_at_a_time_against_the_national_people_gives_the_same_scores_as_scoring_everything_at_once():
+    rng = np.random.default_rng(7)
+    n = 400
+    g = pd.DataFrame({"cell_key": np.arange(n), "people": np.where(rng.random(n) < 0.2, 0.0, np.round(rng.gamma(2, 15, n), 2)),
+                      "imd_decile": rng.integers(1, 11, n).astype(float), "haz_rs": rng.uniform(0, 4, n), "critical_sites": rng.integers(0, 4, n).astype(float)})
+    w = {"pop": 0.4, "vulnerability": 0.3, "critical": 0.3}
+    whole = add_score(g, w)
+    parts = [add_score(g.iloc[i::3], w, all_people=g["people"]) for i in range(3)]
+    tiled = pd.concat(parts).sort_values("cell_key")
+    assert np.allclose(tiled["pop_pct"].to_numpy(), whole["pop_pct"].to_numpy(), atol=1e-4)
+    assert np.allclose(tiled["risk_score"].to_numpy(), whole["risk_score"].to_numpy(), atol=0.02)
+
+
+def test_national_percentile_matches_pandas_rank_with_ties():
+    v = pd.Series([0, 0, 5, 5, 5, 9, 12.0])
+    assert np.allclose(national_percentile(v, v), v.rank(pct=True).to_numpy())
