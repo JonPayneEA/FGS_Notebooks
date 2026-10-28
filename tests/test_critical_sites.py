@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.critical_sites import (  # noqa: E402
-    COLUMNS, classify_osm, dedupe_nearby, fetch_ods_role, gias_sites, keep_hospitals, normalise_postcode, ods_sites, osm_sites, standardise,
+    COLUMNS, classify_osm, dedupe_nearby, fetch_ods_role, gias_sites, keep_hospitals, merge_clusters, normalise_postcode, ods_sites, osm_sites, standardise,
 )
 
 
@@ -186,10 +186,48 @@ def test_a_role_can_be_a_dict_of_search_parameters_and_the_parameters_are_sent()
 
 
 def test_trust_sites_are_cut_down_to_hospital_type_names_and_gp_practices_are_left_alone():
-    rows = [("NHS trust site", n) for n in ["LEEDS GENERAL INFIRMARY", "ST JAMES'S UNIVERSITY HOSPITAL", "WARD 7 ANNEX", "NORTHGATE HEALTH CENTRE",
-                                              "KINGS A&E DEPARTMENT", "TRUST HEADQUARTERS", "OAKWOOD URGENT TREATMENT CENTRE"]] + [("GP practice", "ALPHA SURGERY")]
-    d = pd.DataFrame({"site_id": "", "site_group": "health", "site_type": [r[0] for r in rows], "name": [r[1] for r in rows], "easting": 1.0, "northing": 1.0,
+    names = ["LEEDS GENERAL INFIRMARY", "ST JAMES'S UNIVERSITY HOSPITAL", "WARD 7 ANNEX", "NORTHGATE HEALTH CENTRE", "KINGS A&E DEPARTMENT", "TRUST HEADQUARTERS",
+             "OAKWOOD URGENT TREATMENT CENTRE"]
+    rows = [("NHS trust site", n) for n in names] + [("GP practice", "ALPHA SURGERY")]
+    d = pd.DataFrame({"site_id": "", "site_group": "health", "site_type": [r[0] for r in rows], "name": [r[1] for r in rows],
+                      "easting": [10_000.0 * (i + 1) for i in range(len(rows))], "northing": 1.0,           # far apart, so none merge
                       "postcode": "", "source": "nhs_ods", "source_id": [str(i) for i in range(len(rows))]})
     out = keep_hospitals(d)
-    assert sorted(out["name"]) == sorted(["LEEDS GENERAL INFIRMARY", "ST JAMES'S UNIVERSITY HOSPITAL", "KINGS A&E DEPARTMENT", "OAKWOOD URGENT TREATMENT CENTRE", "ALPHA SURGERY"])
+    assert sorted(out["name"]) == sorted(["LEEDS GENERAL INFIRMARY", "ST JAMES'S UNIVERSITY HOSPITAL", "OAKWOOD URGENT TREATMENT CENTRE", "ALPHA SURGERY"])
     assert set(out.loc[out["name"] != "ALPHA SURGERY", "site_type"]) == {"hospital"} and out.loc[out["name"] == "ALPHA SURGERY", "site_type"].iloc[0] == "GP practice"
+
+
+def test_solar_and_wind_farms_are_not_power_stations_but_a_gas_plant_is():
+    assert classify_osm({"power": "plant", "plant:source": "solar"}) is None
+    assert classify_osm({"power": "plant", "generator:source": "wind"}) is None
+    assert classify_osm({"power": "plant", "plant:source": "gas"}) == ("utilities", "power station")
+    assert classify_osm({"power": "plant"}) == ("utilities", "power station")
+
+
+def nhs(names, xy):
+    return pd.DataFrame({"site_id": "", "site_group": "health", "site_type": "NHS trust site", "name": names, "easting": [p[0] for p in xy], "northing": [p[1] for p in xy],
+                         "postcode": "", "source": "nhs_ods", "source_id": [str(i) for i in range(len(names))]})
+
+
+def test_many_records_of_one_hospital_become_one_site_and_ward_records_are_dropped():
+    names = ["LEEDS GENERAL INFIRMARY", "LEEDS GENERAL INFIRMARY OUTPATIENT DEPARTMENT", "WARD 12 LEEDS GENERAL INFIRMARY", "BECKETT STREET HOSPITAL PHARMACY",
+             "ST JAMES'S UNIVERSITY HOSPITAL", "SJUH MATERNITY HOSPITAL ANNEXE"]
+    xy = [(430000, 433000), (430080, 433040), (430120, 433010), (430200, 433100), (431500, 434000), (431540, 434020)]
+    out = keep_hospitals(nhs(names, xy))
+    assert sorted(out["name"]) == ["LEEDS GENERAL INFIRMARY", "ST JAMES'S UNIVERSITY HOSPITAL"]      # the maternity annexe joins St James's cluster, shorter name wins
+    assert (out["site_type"] == "hospital").all()
+
+
+def test_clusters_chain_and_far_apart_sites_stay_separate():
+    d = nhs(["a", "bb", "ccc", "far"], [(0, 0), (200, 0), (400, 0), (5000, 0)])
+    out = merge_clusters(d, 250)
+    assert sorted(out["name"]) == ["a", "far"]
+
+
+def test_a_wider_radius_applies_against_postcode_placed_nhs_sites_than_against_surveyed_schools():
+    keep = standardise([pd.DataFrame({"site_id": "", "site_group": ["health", "education"], "site_type": ["GP practice", "Primary"], "name": ["gp", "sch"],
+                                      "easting": [1000.0, 9000.0], "northing": [0.0, 0.0], "postcode": ["", ""], "source": ["nhs_ods", "gias"], "source_id": ["1", "2"]})])
+    cand = pd.DataFrame({"site_id": "", "site_group": ["health", "education", "health"], "site_type": ["gp surgery", "nursery", "gp surgery"], "name": ["near gp 250m", "near school 250m", "gp 600m"],
+                         "easting": [1250.0, 9250.0, 1600.0], "northing": [0.0, 0.0, 0.0], "postcode": [""] * 3, "source": ["osm"] * 3, "source_id": ["a", "b", "c"]})
+    out = dedupe_nearby(keep, cand, 150, radius_by_source={"nhs_ods": 300})
+    assert sorted(out["name"]) == ["gp 600m", "near school 250m"]        # 250 m from an NHS site is the same place; 250 m from a school is not
