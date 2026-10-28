@@ -16,7 +16,7 @@
 # two digits: the first is the easting offset in tens of km (0 or 5), the second the northing offset. Each tile is 50 km.
 #
 #   tile_code / is_present_day   read a folder name; folders with Climate_Change in the name are the future scenario
-#   tile_bounds                  (xmin, ymin, xmax, ymax) in British National Grid metres
+#   tile_bounds / tile_code_at   (xmin, ymin, xmax, ymax) of a tile, and the tile containing each point
 #   RasterAccumulator            paint polygons batch by batch (so a tile larger than memory still works), then finalize
 #   sample_ranks                 the rank at points (0 outside the tile or outside any flood area)
 #   cell_shares                  per 100 m cell, the share of its area in each band (cells with no band are left out)
@@ -56,6 +56,25 @@ def tile_bounds(code):
     x0 += int(code[2]) * 10_000
     y0 += int(code[3]) * 10_000
     return float(x0), float(y0), float(x0 + TILE_M), float(y0 + TILE_M)
+
+
+def tile_code_at(easting, northing):
+    """The 50 km tile code containing each point (the inverse of tile_bounds). Arrays in, an array of strings out; points outside the
+    lettered grid give an empty string."""
+    e, n = np.asarray(easting, dtype="float64"), np.asarray(northing, dtype="float64")
+    big_col = np.floor(e / 500_000).astype("int64") + 2
+    big_row = 3 - np.floor(n / 500_000).astype("int64")
+    e_in, n_in = np.mod(e, 500_000), np.mod(n, 500_000)
+    small_col = np.floor(e_in / 100_000).astype("int64")
+    small_row = 4 - np.floor(n_in / 100_000).astype("int64")
+    d1 = (np.floor(np.mod(e, 100_000) / 50_000).astype("int64")) * 5
+    d2 = (np.floor(np.mod(n, 100_000) / 50_000).astype("int64")) * 5
+    ok = (big_col >= 0) & (big_col < 5) & (big_row >= 0) & (big_row < 5)
+    letters = np.array(list(OS_LETTERS))
+    big = np.where(ok, big_row * 5 + big_col, 0)
+    small = np.where(ok, small_row * 5 + small_col, 0)
+    out = np.char.add(np.char.add(letters[big], letters[small]), np.char.add(d1.astype(str), d2.astype(str)))
+    return np.where(ok, out, "")
 
 
 def _shape(bounds, res):
