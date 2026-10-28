@@ -357,4 +357,5 @@ GRID_CELL_M = 100          # the cell size of the British National Grid layer (s
 # The composite score per cell: hazard (worse of the rivers and sea and the surface water band) times a weighted mix of these three.
 # The weights are normalised, so only their proportions matter. The layers are always stored; the score is never the only output.
 RISK_SCORE_WEIGHTS = {"pop": 0.4, "vulnerability": 0.3, "critical": 0.3}
+RISK_SCORE_INCLUDE_SURFACE = False   # flood warning areas are for rivers, the sea and tidal waters: surface water is shown separately and left out of the score unless this is True
 RISK_SCORE_CRITICAL_CAP = 3   # critical sites in a cell beyond this add nothing more to the score

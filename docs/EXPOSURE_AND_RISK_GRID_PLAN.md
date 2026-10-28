@@ -21,11 +21,21 @@ A mock-up with invented numbers, in the app's design, is in `docs/EXPOSURE_MOCKU
 |---|---|
 | Method | **Points first, grid second.** Where address or receptor points are held, the sums are made from the points (exact point in area, band looked up at the point). The 100 m British National Grid is the aggregation and product layer, and carries the layers that have no points. |
 | Grid | 100 m British National Grid. Cell key = (northing // 100) * 10,000 + (easting // 100). |
-| Risk zones | NaFRA2 bands, rivers and sea and surface water kept separate. Flood Zones 2 and 3 added as a second view. |
+| Risk zones | NaFRA2 bands, rivers and sea and surface water kept separate. Flood Zones 2 and 3 added as a second view, split by mapping source into coastal (sea), fluvial (river) and mapped together. See "Coastal, fluvial and surface water". |
 | Critical sites | All four groups: health and care, education, emergency services and prisons, utilities and hazardous sites. |
 | Score | Layers first, plus a simple adjustable score. Weights in `config.RISK_SCORE_WEIGHTS`. |
 | Big Environment Agency datasets | May already be governed tables, so notebooks read a table name or a file path from a widget, whichever you have. |
 | Out of scope | Scotland and Wales observed data. |
+
+## Coastal, fluvial and surface water
+
+These are three different hazards. They are kept apart in every table and in the app, and are never added or merged without saying so.
+
+- **Warning and alert areas are for coastal and fluvial risk.** Each area already carries its type from the EA feed (`river_or_sea`, `is_tidal`, and the code: fluvial, coastal or tidal). Exposure for a warning area is reported against **rivers and sea** first, labelled with that type.
+- **Surface water is context, not a warning basis.** It is shown in its own column and chart, marked as not part of what a warning area is issued for, and it is left out of the composite score by default.
+- **The NaFRA2 Risk of Flooding from Rivers and Sea layer is one layer.** It does not say which cell is coastal and which fluvial. The area's type gives the reading: a coastal area's band is mainly sea risk, a fluvial area's mainly river risk, and a tidal river area both.
+- **Flood Zones 2 and 3 do say.** They carry a mapping source, so job 30 writes them split into sea (coastal), river (fluvial) and river and sea mapped together, as well as all together. That is the only true coastal against fluvial split in the data we hold.
+- **Where an area's type is mixed** (a warning area with both tidal and river sources), the figures are reported once against rivers and sea, never summed across types.
 
 ## Units and how each number is made
 
@@ -66,7 +76,7 @@ The same rule applies to the forecast polygons, which overlap by source and day:
 
 ## The score
 
-`score = 100 * hazard * (w_pop * population_percentile + w_vuln * deprivation + w_crit * critical)`, with hazard as the worse of the two bands divided by four. No hazard means no score. Defaults: population 0.4, vulnerability 0.3, critical sites 0.3 (normalised). Critical sites beyond three in one cell add nothing more. This is a judgement, so the weights are one setting and the method is written down.
+`score = 100 * hazard * (w_pop * population_percentile + w_vuln * deprivation + w_crit * critical)`, with hazard as the **rivers and sea** band divided by four. Surface water is left out by default, because warning and alert areas are issued for rivers, the sea and tidal waters, not for surface water (`config.RISK_SCORE_INCLUDE_SURFACE`; set it to True to use the worse of the two). No hazard means no score. Defaults: population 0.4, vulnerability 0.3, critical sites 0.3 (normalised). Critical sites beyond three in one cell add nothing more. This is a judgement, so the weights are one setting and the method is written down.
 
 ## Inputs
 
