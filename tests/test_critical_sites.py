@@ -136,14 +136,16 @@ class FakeResponse:
 
 
 def make_get(accept, total=2500):
-    """A fake API that answers 406 unless `accept(headers, params)` is true, then serves `total` organisations in pages."""
+    """A fake API that answers 406 unless `accept(headers, params)` is true, and, like the real one, 406 for an Offset below 1 (it counts from 1)."""
     calls = []
 
     def get(url, params, headers):
         calls.append((dict(params), dict(headers)))
+        if params["Offset"] < 1:
+            return FakeResponse(406, text='{"errorCode":406,"errorText":"Supplied Offset must be greater than 1"}')
         if not accept(headers, params):
             return FakeResponse(406, text="Not Acceptable")
-        lo = params["Offset"]
+        lo = params["Offset"] - 1
         return FakeResponse(200, {"Organisations": [{"OrgId": str(i)} for i in range(lo, min(lo + params["Limit"], total))]})
     get.calls = calls
     return get
@@ -154,7 +156,7 @@ def test_the_ods_fetch_falls_back_to_a_variant_the_api_accepts_and_pages_through
     orgs, label = fetch_ods_role(get, "RO198")
     assert len(orgs) == 2500 and label == "browser client"
     assert len({o["OrgId"] for o in orgs}) == 2500                              # no page repeated or missed
-    assert [p["Offset"] for p, h in get.calls if "Mozilla" in h.get("User-Agent", "")] == [0, 1000, 2000]    # three pages, all with the chosen variant
+    assert [p["Offset"] for p, h in get.calls if "Mozilla" in h.get("User-Agent", "")] == [1, 1001, 2001]    # three pages, counted from 1, all with the chosen variant
 
 
 def test_the_first_variant_is_used_when_it_works_and_a_total_of_exactly_one_page_stops_at_the_next_empty_one():
@@ -169,3 +171,9 @@ def test_when_every_variant_is_refused_the_error_shows_each_status():
         fetch_ods_role(get, "RO198")
     msg = str(e.value)
     assert "406" in msg and "_format=json" in msg and "browser client" in msg and "Not Acceptable" in msg
+
+
+def test_the_first_attempt_succeeds_now_that_paging_starts_at_one():
+    get = make_get(lambda h, p: True, total=1500)
+    orgs, label = fetch_ods_role(get, "RO198")
+    assert label == "_format=json" and len(orgs) == 1500 and get.calls[0][0]["Offset"] == 1
