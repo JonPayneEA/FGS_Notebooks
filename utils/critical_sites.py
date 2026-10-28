@@ -40,13 +40,15 @@ ODS_VARIANTS = (
 )
 
 
-def fetch_ods_role(get, role: str, page: int = 1000, base: str = "https://directory.spineservices.nhs.uk/ORD/2-0-0/organisations", variants=ODS_VARIANTS):
-    """All active organisations with an ODS primary role. `get(url, params, headers)` returns a response with status_code, text and json().
+def fetch_ods_role(get, role, page: int = 1000, base: str = "https://directory.spineservices.nhs.uk/ORD/2-0-0/organisations", variants=ODS_VARIANTS):
+    """All active organisations with an ODS role. `role` is a role id (taken as the primary role) or a dict of search parameters such as
+    {"NonPrimaryRoleId": "RO76"}. `get(url, params, headers)` returns a response with status_code, text and json().
     Each variant is tried for the first page until one answers 200; that one is then used for every further page. If none works, the error
     lists each attempt with its status and the start of the reply, so the cause can be seen. Returns (organisations, the variant that worked)."""
+    role_params = {"PrimaryRoleId": role} if isinstance(role, str) else dict(role)
     attempts, chosen = [], None
     for label, headers, extra in variants:
-        params = {"PrimaryRoleId": role, "Status": "Active", "Limit": page if "_small" not in extra else 100, "Offset": 1,
+        params = {**role_params, "Status": "Active", "Limit": page if "_small" not in extra else 100, "Offset": 1,
                   **{k: v for k, v in extra.items() if k != "_small"}}
         r = get(base, params, headers)
         if r.status_code == 200:
@@ -60,12 +62,35 @@ def fetch_ods_role(get, role: str, page: int = 1000, base: str = "https://direct
     out, offset, orgs = list(first), 1, first            # the API counts pages from 1: "Supplied Offset must be greater than 1" (as it replied to Offset=0)
     while len(orgs) >= limit:
         offset += limit
-        params = {"PrimaryRoleId": role, "Status": "Active", "Limit": limit, "Offset": offset, **{k: v for k, v in extra.items() if k != "_small"}}
+        params = {**role_params, "Status": "Active", "Limit": limit, "Offset": offset, **{k: v for k, v in extra.items() if k != "_small"}}
         r = get(base, params, headers)
         r.raise_for_status() if hasattr(r, "raise_for_status") else None
         orgs = r.json().get("Organisations", [])
         out.extend(orgs)
     return out, label
+
+
+# GP practices are not found by PrimaryRoleId=RO76 (it returned nothing): in the NHS directory a practice has RO177 (prescribing cost centre) as its
+# primary role and RO76 (GP practice) as a secondary one. These ways of asking are tried in order; the first that returns records is used.
+GP_PRACTICE_QUERIES = (
+    ("non-primary role RO76", {"NonPrimaryRoleId": "RO76"}),
+    ("role RO76", {"Roles": "RO76"}),
+    ("primary role RO76", {"PrimaryRoleId": "RO76"}),
+    ("primary role RO177 (prescribing cost centre, includes GP practices)", {"PrimaryRoleId": "RO177"}),
+)
+# NHS trust sites (role RO198) are every site of every trust: wards, clinics, offices, health centres. Only these names are hospital-type
+# sites; the rest are dropped when the table is built (the saved copy keeps them all).
+HOSPITAL_WORDS = r"\b(hospital|infirmary|a ?& ?e|accident|emergency (department|care)|urgent (treatment|care)|walk[- ]?in|minor injur|maternity|birth ?(centre|center)|mental health unit|psychiatric)\b"
+
+
+def keep_hospitals(sites: pd.DataFrame) -> pd.DataFrame:
+    """Of NHS ODS sites, keep GP practices and trust sites whose name says hospital-type care. Returns the kept rows with trust sites re-typed
+    'hospital'. Other sources are untouched."""
+    d = sites.copy()
+    trust = d["site_type"] == "NHS trust site"
+    named = d["name"].astype(str).str.contains(HOSPITAL_WORDS, case=False, regex=True)
+    d.loc[trust & named, "site_type"] = "hospital"
+    return d[~(trust & ~named)].reset_index(drop=True)
 
 
 def normalise_postcode(s):
