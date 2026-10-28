@@ -1167,6 +1167,7 @@ ones. See "History is an archive" above.
 │   ├── 16_build_wiski_lookup          Telemetry mapping matched to measures: gauge names, FFFS and WISKI ids (manual)
 │   ├── 17_build_thresholds_table      Flood thresholds into the restricted schema (manual)
 │   ├── 27_fw_timing_validation        Was each flood warning out before the RES level, by the target lead time (manual, restricted)
+│   ├── 29_load_census_deprivation     Census 2021 by output area and the IoD2025 by LSOA, for the exposure grid (manual)
 │   └── 28_link_thresholds_to_gauges   Observed flood warning thresholds linked to gauge measures, restricted schema (manual)
 ├── master/                            Schedule these notebooks
 │   ├── Master_polling, Master_daily, Master_weekly, Master_quarterly
