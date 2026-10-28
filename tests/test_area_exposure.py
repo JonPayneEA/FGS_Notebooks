@@ -135,6 +135,9 @@ def test_geojson_areas_become_valid_polygons_in_british_national_grid_and_lines_
     assert status == ["ok", "ok", "not a polygon", "no geometry", "no geometry"]
     assert geoms[0].is_valid and 425000 < geoms[0].centroid.x < 435000 and 430000 < geoms[0].centroid.y < 436000
     assert geoms[1].is_valid and geoms[1].area > 0
+    # a file already in British National Grid is taken as it is
+    bng, st = to_bng_polygons(['{"type":"Polygon","coordinates":[[[430000,433000],[431000,433000],[431000,434000],[430000,433000]]]}'], source_epsg=27700)
+    assert st == ["ok"] and abs(bng[0].centroid.x - 430666.7) < 1
 
 
 def test_the_gap_is_what_no_area_covers_nationally_and_by_constituency():

@@ -107,3 +107,48 @@ def parse_district_lookup(df: pd.DataFrame, geography: str) -> pd.DataFrame:
     out = pd.DataFrame({"district_code": d[lad].astype(str).str.strip(), "geography": geography,
                         "geography_code": d[code_col].astype(str).str.strip(), "geography_name": d[name_col].astype(str).str.strip()})
     return out[out["geography_code"].notna() & ~out["geography_code"].isin(["", "nan", "None"])].drop_duplicates(["district_code", "geography_code"]).reset_index(drop=True)
+
+
+def read_geojson_features(text: str):
+    """A GeoJSON FeatureCollection as (a frame of the properties plus a `geometry` column of GeoJSON text per feature, the EPSG code). The code is 4326
+    unless the file names another coordinate system (an old-style 'crs' member, as in files exported in British National Grid, 27700)."""
+    import json
+    j = json.loads(text)
+    if j.get("type") != "FeatureCollection":
+        raise ValueError("Expected a GeoJSON FeatureCollection.")
+    epsg = 4326
+    name = str(((j.get("crs") or {}).get("properties") or {}).get("name", ""))
+    m = re.search(r"(\d{4,5})\s*$", name)
+    if m:
+        epsg = int(m.group(1))
+    rows = []
+    for f in j.get("features", []):
+        r = dict(f.get("properties") or {})
+        r["geometry"] = json.dumps(f["geometry"]) if f.get("geometry") else None
+        rows.append(r)
+    return pd.DataFrame(rows), epsg
+
+
+def assign_points_to_polygons(x, y, polys, max_nearest_m: float = 2000.0):
+    """For each point, the index of the polygon it lies in, or, if it lies in none (a coastal point just outside a boundary clipped to the coast),
+    the nearest polygon within `max_nearest_m`; -1 if there is none. A point in two overlapping polygons takes the lower index. Returns an int array
+    and the number of points placed by the nearest fallback."""
+    import numpy as np
+    import shapely
+    tree = shapely.STRtree(np.asarray(polys, dtype=object))
+    pts = shapely.points(np.asarray(x, dtype="float64"), np.asarray(y, dtype="float64"))
+    out = np.full(len(pts), -1, dtype="int64")
+    pi, gi = tree.query(pts, predicate="intersects")
+    # query returns pairs in ascending point order; keep the first (lowest polygon index) per point
+    order = np.lexsort((gi, pi))
+    pi, gi = pi[order], gi[order]
+    first = np.r_[True, pi[1:] != pi[:-1]]
+    out[pi[first]] = gi[first]
+    missing = np.flatnonzero(out < 0)
+    nearest = 0
+    if len(missing):
+        ni, dist = tree.query_nearest(pts[missing], return_distance=True, all_matches=False)
+        ok = dist <= max_nearest_m
+        out[missing[ni[0][ok]]] = ni[1][ok]
+        nearest = int(ok.sum())
+    return out, nearest
