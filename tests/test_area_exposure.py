@@ -231,3 +231,19 @@ def test_tile_checkpoint_round_trips_and_refuses_results_made_from_something_els
     assert "address points have changed" in load_tile_checkpoint(path, tile_signature(areas, tiles.assign(count=[10, 21])))[2]
     open(path, "wb").write(b"not a pickle")
     assert load_tile_checkpoint(path, sig)[0] is None
+
+
+def test_geographies_reached_through_a_lookup_are_split_like_the_others_and_unmapped_points_drop_out():
+    pts = make_points().assign(oa=["O1", "O1", "O2", "O2", "O3", "O9"], lad=["D1", "D1", "D1", "D2", "D2", "D3"])
+    maps = {"fire_and_rescue_authority": ("oa", {"O1": "F1", "O2": "F1", "O3": "F2", "O9": "F2"}), "combined_authority": ("lad", {"D1": "C1"})}
+    s = tile_stats(pts, GEOMS, IDS, KINDS, extra_maps=maps)
+    g = s["area_geo"]
+    fire = g.xs(("flood_warning", "B", "fire_and_rescue_authority"), level=("kind", "area_id", "geography"))
+    assert fire["people"].sum() == s["area"].loc[("flood_warning", "B"), "people"]               # every point has a fire authority here
+    ca = g.xs(("flood_warning", "B", "combined_authority"), level=("kind", "area_id", "geography"))
+    assert "" in ca.index                                                                          # the unmapped points are summed under an empty code, dropped when finished
+    ca = ca.drop("")
+    assert ca.loc["C1", "people"] > 0 and ca["people"].sum() < s["area"].loc[("flood_warning", "B"), "people"]      # D2 and D3 are in no combined authority
+    out = finish_area_geographies(g, s["area"].reset_index()[["kind", "area_id", "people"]])
+    assert (out["code"].astype(str).str.len() > 0).all()                                            # the empty code (no authority) is dropped
+    assert tile_stats(pts, GEOMS, IDS, KINDS, extra_maps={"x": ("missing_column", {})})["area_geo"].index.get_level_values("geography").isin(["x"]).sum() == 0
