@@ -282,6 +282,42 @@ def site_membership(sites: pd.DataFrame, geoms, area_ids, kinds) -> pd.DataFrame
     return d[cols].sort_values(["kind", "area_id", "rofrs_rank", "name"], ascending=[True, True, False, True]).reset_index(drop=True)
 
 
+def tile_signature(areas: pd.DataFrame, tile_counts: pd.DataFrame) -> dict:
+    """What a saved set of tile results was made from: the areas (ids and kinds) and the tiles with their point counts. If either changes
+    the saved results are stale and must be recomputed."""
+    ids = "|".join(sorted(areas["kind"].astype(str) + ":" + areas["area_id"].astype(str)))
+    tiles = {str(t): int(n) for t, n in zip(tile_counts["tile"], tile_counts["count"])}
+    import hashlib
+    return {"areas": len(areas), "areas_hash": hashlib.sha1(ids.encode()).hexdigest(), "tiles": tiles}
+
+
+def save_tile_checkpoint(path: str, results, log, signature: dict) -> None:
+    """Save the per-tile sums (not address-level data) so a restart after the tile loop does not repeat it."""
+    import os
+    import pickle
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".part"
+    with open(tmp, "wb") as f:
+        pickle.dump({"signature": signature, "results": results, "log": log}, f)
+    os.replace(tmp, path)                      # never leave a half-written file that a later run might trust
+
+
+def load_tile_checkpoint(path: str, signature: dict):
+    """(results, log, '') if `path` holds results made from the same areas and tiles; otherwise (None, None, the reason)."""
+    import os
+    import pickle
+    if not os.path.exists(path):
+        return None, None, "no saved results at that path"
+    try:
+        with open(path, "rb") as f:
+            saved = pickle.load(f)
+    except Exception as e:                      # a corrupt or foreign file
+        return None, None, f"the saved file could not be read ({str(e)[:80]})"
+    if saved.get("signature") != signature:
+        return None, None, "the areas or the address points have changed since the results were saved"
+    return saved["results"], saved["log"], ""
+
+
 def finish_area_geographies(area_geo: pd.DataFrame, exposure: pd.DataFrame, names: pd.DataFrame = None) -> pd.DataFrame:
     """The summed area by geography frame as rows: the responder's name (from `names`: geography, code, name), and the share of the area's people
     in it. Rows with no code (points outside the lookup) are dropped. Biggest share first within each area and geography."""
