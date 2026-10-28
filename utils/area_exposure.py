@@ -133,8 +133,9 @@ def _sum_by(frame: pd.DataFrame, by, cols) -> pd.DataFrame:
     return frame.groupby(by, sort=False)[list(cols)].sum()
 
 
-def tile_stats(points: pd.DataFrame, geoms, area_ids, kinds, min_pair_people: float = 0.0) -> dict:
+def tile_stats(points: pd.DataFrame, geoms, area_ids, kinds, min_pair_people: float = 0.0, extra_maps: dict = None) -> dict:
     """One tile's points against all areas. `geoms` is a list of polygons (British National Grid), `area_ids` and `kinds` are parallel to it.
+    `extra_maps` adds geographies reached through a lookup (see the area_geo code below).
     Returns a dict of frames, each a sum that can be added across tiles (concatenate, then groupby the key columns and sum):
       area      (kind, area_id): gross VALUE_COLS, then <measure>_unique and <measure>_split for UNIQUE_SPLIT
       pairs     (kind, area_a, area_b): shared addresses and people (a < b)
@@ -191,6 +192,15 @@ def tile_stats(points: pd.DataFrame, geoms, area_ids, kinds, min_pair_people: fl
         if col not in points:
             continue
         code = points[col].astype("object").where(points[col].notna(), "").to_numpy()
+        G = pd.DataFrame(vals[GEO_VALUE_COLS].to_numpy()[pi], columns=GEO_VALUE_COLS)
+        G["kind"], G["area_id"], G["geography"], G["code"] = pairs["kind"].to_numpy(), pairs["area_id"].to_numpy(), geography, code[pi]
+        geo_parts.append(_sum_by(G, ["kind", "area_id", "geography", "code"], GEO_VALUE_COLS))
+    # geographies the address points do not carry, reached through a lookup on a column they do (fire and rescue authority from the output area,
+    # combined authority from the district): extra_maps is {geography: (point column, {key: code})}. A point whose key is not in the map has no code.
+    for geography, (col, mapping) in (extra_maps or {}).items():
+        if col not in points:
+            continue
+        code = points[col].astype("object").map(mapping).fillna("").to_numpy()
         G = pd.DataFrame(vals[GEO_VALUE_COLS].to_numpy()[pi], columns=GEO_VALUE_COLS)
         G["kind"], G["area_id"], G["geography"], G["code"] = pairs["kind"].to_numpy(), pairs["area_id"].to_numpy(), geography, code[pi]
         geo_parts.append(_sum_by(G, ["kind", "area_id", "geography", "code"], GEO_VALUE_COLS))
