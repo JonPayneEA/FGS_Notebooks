@@ -354,6 +354,8 @@ TBL_HAZARD_CELLS = f"{CATALOG}.{SCHEMA}.hazard_cells_100m"  # job 30: per 100 m 
 HAZARD_RES_M = 10          # the raster resolution the flood polygons are painted at (point lookups are within 7 m of a polygon edge)
 HAZARD_RASTER_DIR = f"/Volumes/{CATALOG}/{SCHEMA}/{EXTERNAL_VOLUME}/hazard_rasters"   # job 30: one .npz per source and 50 km tile; job 33 samples them at address points
 TBL_ADDRESS_POINTS = f"{CATALOG}.{RESTRICTED_SCHEMA}.exposure_address_points"   # job 33: one row per England UPRN (restricted schema): Census shares, deprivation, flood band ranks
+TBL_CRITICAL_SITES = f"{CATALOG}.{RESTRICTED_SCHEMA}.critical_sites"                  # job 31 (not yet built): one row per site; job 34 counts it per cell if it exists
+TBL_EXPOSURE_GRID  = f"{CATALOG}.{RESTRICTED_SCHEMA}.exposure_grid_100m"              # job 34: one row per 100 m cell with people, exposure, band shares, critical sites and the score
 GRID_CELL_M = 100          # the cell size of the British National Grid layer (see utils/grid100.py; changing it changes every key)
 # The composite score per cell: hazard (worse of the rivers and sea and the surface water band) times a weighted mix of these three.
 # The weights are normalised, so only their proportions matter. The layers are always stored; the score is never the only output.
