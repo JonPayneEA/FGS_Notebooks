@@ -126,12 +126,16 @@ def census_oa_table(ts001: pd.DataFrame, ts007a: pd.DataFrame, ts041: pd.DataFra
     return out, rep
 
 
-def find_iod_links(html: str) -> list:
-    """Links on the gov.uk statistics page that look like the IoD2025 'all ranks, scores, deciles' file (File 7), best first."""
-    links = re.findall(r'href="([^"]+\.(?:csv|xlsx|ods))"', html, flags=re.I)
+def find_iod_links(html: str, base: str = "https://www.gov.uk") -> list:
+    """Links on the gov.uk statistics page that look like the IoD2025 'all ranks, scores, deciles' file (File 7), best first.
+    Relative links are made absolute, and gov.uk's csv-preview pages (which are web pages, not the file) are left out."""
+    from urllib.parse import urljoin
+    links = [urljoin(base, u) for u in re.findall(r'href="([^"]+\.(?:csv|xlsx|ods))"', html, flags=re.I)]
+    links = [u for u in links if "csv-preview" not in u.lower()]
     def score(u):
         s = u.lower()
-        return (("file_7" in s or "file 7" in s) * 4 + ("all_ranks" in s or "all ranks" in s or "scores" in s) * 2 + ("deciles" in s) * 1 + s.endswith(".csv") * 1)
+        return (("assets.publishing.service.gov.uk" in s) * 8 + ("file_7" in s or "file 7" in s) * 4
+                + ("all_ranks" in s or "all ranks" in s or "scores" in s) * 2 + ("deciles" in s) * 1 + s.endswith(".csv") * 1)
     return sorted(set(links), key=score, reverse=True)
 
 

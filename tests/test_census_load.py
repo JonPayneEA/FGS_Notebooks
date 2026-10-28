@@ -94,3 +94,14 @@ def test_the_households_table_with_no_total_in_its_column_name_is_read():
     t, rep = census_oa_table(ts001, ts007a, ts041)
     assert t.set_index("oa").loc["E00000001", "households"] == 120
     assert "Number of households" in rep["households_column"]
+
+
+def test_the_iod_link_finder_skips_csv_preview_pages_and_makes_links_absolute():
+    html = ('<a href="/csv-preview/691ded/File_7_IoD2025_All_Ranks_Scores_Deciles_Population_Denominators.csv">preview</a>'
+            '<a href="https://assets.publishing.service.gov.uk/media/691ded/File_7_IoD2025_All_Ranks_Scores_Deciles_Population_Denominators.csv">file</a>'
+            '<a href="https://assets.publishing.service.gov.uk/media/691ded/File_5_IoD2025_Scores_for_the_Indices_of_Deprivation.xlsx">five</a>'
+            '<a href="/government/uploads/File_7_something.csv">relative</a>')
+    links = find_iod_links(html)
+    assert all("csv-preview" not in u for u in links)
+    assert links[0] == "https://assets.publishing.service.gov.uk/media/691ded/File_7_IoD2025_All_Ranks_Scores_Deciles_Population_Denominators.csv"
+    assert all(u.startswith("http") for u in links)
