@@ -116,8 +116,13 @@ def census_oa_table(ts001: pd.DataFrame, ts007a: pd.DataFrame, ts041: pd.DataFra
     else:
         out["households"] = float("nan")
     if "age_total" in out:
-        off = (out["age_total"] - out["population"]).abs()
+        off = (pd.to_numeric(out["age_total"], errors="coerce") - pd.to_numeric(out["population"], errors="coerce")).abs()
         rep["age_total_differs_from_population_in"] = int((off > 0.5).sum())
+        # Census 2021 perturbs each table separately (disclosure control), so small differences between tables are expected;
+        # a large one would mean a column or a merge is wrong
+        rep["age_total_max_difference"] = int(off.max()) if len(off) else 0
+        rep["age_total_differs_by_more_than_5"] = int((off > 5).sum())
+        rep["age_total_difference_in_people"] = int(pd.to_numeric(out["age_total"], errors="coerce").sum() - pd.to_numeric(out["population"], errors="coerce").sum())
         out = out.drop(columns=["age_total"])
     out["share_65plus"] = (out["age65plus"] / out["population"]).where(out["population"] > 0)
     for c in ("population", "households", "age65plus"):

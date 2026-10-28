@@ -105,3 +105,11 @@ def test_the_iod_link_finder_skips_csv_preview_pages_and_makes_links_absolute():
     assert all("csv-preview" not in u for u in links)
     assert links[0] == "https://assets.publishing.service.gov.uk/media/691ded/File_7_IoD2025_All_Ranks_Scores_Deciles_Population_Denominators.csv"
     assert all(u.startswith("http") for u in links)
+
+
+def test_the_report_gives_the_size_of_any_age_table_difference():
+    ts001 = pd.DataFrame({"geography code": ["E1", "E2", "E3"], "Residence type: Total; measures: Value": [100, 100, 100]})
+    ts007a = pd.DataFrame({"geography code": ["E1", "E2", "E3"], "Age: Total": [100, 101, 120], "Age: Aged 65 to 69 years": [5, 5, 5]})
+    _, rep = census_oa_table(ts001, ts007a, None)
+    assert rep["age_total_differs_from_population_in"] == 2 and rep["age_total_max_difference"] == 20
+    assert rep["age_total_differs_by_more_than_5"] == 1 and rep["age_total_difference_in_people"] == 21
