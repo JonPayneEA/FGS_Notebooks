@@ -342,6 +342,35 @@ def finish_area_geographies(area_geo: pd.DataFrame, exposure: pd.DataFrame, name
     return g.sort_values(["kind", "area_id", "geography", "people"], ascending=[True, True, True, False]).reset_index(drop=True)
 
 
+def area_cell_scores(cells: pd.DataFrame, geoms, area_ids, kinds, chunk: int = 2_000_000) -> pd.DataFrame:
+    """A risk score for each area from the 100 m grid: the cells whose centre lies inside the area, their people, the people-weighted mean of the
+    cell risk score (an area full of people in flooded cells scores high; an area of mostly dry cells scores low) and the highest cell score.
+    `cells` has easting, northing (the south-west corner), people and risk_score. Returns (kind, area_id): grid_cells, risk_score, risk_score_max.
+    A big grid is read in chunks of `chunk` cells so the points and the matches stay small."""
+    cols = ["grid_cells", "grid_people", "score_x_people", "risk_score_max"]
+    tree = shapely.STRtree(np.asarray(geoms, dtype=object))
+    kinds_a, ids_a = np.asarray(kinds, dtype=object), np.asarray(area_ids, dtype=object)
+    parts = []
+    for i in range(0, len(cells), chunk):
+        c = cells.iloc[i:i + chunk]
+        x = c["easting"].to_numpy(dtype="float64") + 50.0
+        y = c["northing"].to_numpy(dtype="float64") + 50.0
+        pi, ai = tree.query(shapely.points(x, y), predicate="intersects")
+        if not len(pi):
+            continue
+        people = pd.to_numeric(c["people"], errors="coerce").fillna(0.0).to_numpy()[pi]
+        score = pd.to_numeric(c["risk_score"], errors="coerce").fillna(0.0).to_numpy()[pi]
+        d = pd.DataFrame({"kind": kinds_a[ai], "area_id": ids_a[ai], "grid_cells": 1.0, "grid_people": people, "score_x_people": score * people, "risk_score_max": score})
+        parts.append(d.groupby(["kind", "area_id"], sort=False).agg(grid_cells=("grid_cells", "sum"), grid_people=("grid_people", "sum"),
+                                                                    score_x_people=("score_x_people", "sum"), risk_score_max=("risk_score_max", "max")))
+    if not parts:
+        return pd.DataFrame(columns=["grid_cells", "risk_score", "risk_score_max"], index=pd.MultiIndex.from_arrays([[], []], names=["kind", "area_id"]))
+    t = pd.concat(parts).groupby(level=[0, 1]).agg({"grid_cells": "sum", "grid_people": "sum", "score_x_people": "sum", "risk_score_max": "max"})
+    t["risk_score"] = (t["score_x_people"] / t["grid_people"].where(t["grid_people"] > 0)).round(2)
+    t["risk_score_max"] = t["risk_score_max"].round(2)
+    return t[["grid_cells", "risk_score", "risk_score_max"]]
+
+
 def coverage_with_gap(cov_sum: pd.DataFrame) -> pd.DataFrame:
     """The summed coverage frame (index kind: 'all', 'flood_warning', 'flood_alert') as rows with the gap added: the people, and the people in the
     rivers and sea High or Medium band, that no area of the kind covers."""

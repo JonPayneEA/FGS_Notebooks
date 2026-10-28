@@ -11,7 +11,7 @@ from shapely.geometry import box
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.area_exposure import (  # noqa: E402
-    UNIQUE_SPLIT, VALUE_COLS, combine_tiles, constituency_with_gap, coverage_with_gap, finish_area_geographies, finish_areas, load_tile_checkpoint, save_tile_checkpoint, tile_signature, point_values, site_membership, site_stats, tile_stats, to_bng_polygons,
+    UNIQUE_SPLIT, VALUE_COLS, combine_tiles, constituency_with_gap, coverage_with_gap, area_cell_scores, finish_area_geographies, finish_areas, load_tile_checkpoint, save_tile_checkpoint, tile_signature, point_values, site_membership, site_stats, tile_stats, to_bng_polygons,
 )
 from utils.grid_build import points_to_cells  # noqa: E402
 
@@ -247,3 +247,18 @@ def test_geographies_reached_through_a_lookup_are_split_like_the_others_and_unma
     out = finish_area_geographies(g, s["area"].reset_index()[["kind", "area_id", "people"]])
     assert (out["code"].astype(str).str.len() > 0).all()                                            # the empty code (no authority) is dropped
     assert tile_stats(pts, GEOMS, IDS, KINDS, extra_maps={"x": ("missing_column", {})})["area_geo"].index.get_level_values("geography").isin(["x"]).sum() == 0
+
+
+def test_area_risk_score_is_the_people_weighted_mean_of_cell_scores_inside_each_area_and_works_in_chunks():
+    # cells are 100 m squares with the south-west corner given; centres at +50. GEOMS: A is x 0-600, B is x 400-1000 (y 0-200), C is x 0-1000.
+    cells = pd.DataFrame({"easting": [0.0, 100.0, 450.0, 900.0, 5000.0], "northing": [0.0] * 5, "people": [10.0, 30.0, 20.0, 40.0, 99.0], "risk_score": [80.0, 40.0, 0.0, 20.0, 90.0]})
+    t = area_cell_scores(cells, GEOMS, IDS, KINDS)
+    a = t.loc[("flood_warning", "A")]
+    assert a["grid_cells"] == 3 and a["risk_score"] == round((80 * 10 + 40 * 30 + 0 * 20) / 60, 2) and a["risk_score_max"] == 80
+    assert t.loc[("flood_alert", "C"), "grid_cells"] == 4                         # the cell at x = 5000 is in no area
+    assert t.loc[("flood_warning", "B"), "risk_score"] == round((0 * 20 + 20 * 40) / 60, 2)
+    chunked = area_cell_scores(cells, GEOMS, IDS, KINDS, chunk=2)
+    assert chunked.sort_index().equals(t.sort_index())
+    assert area_cell_scores(cells.iloc[0:0], GEOMS, IDS, KINDS).empty
+    nothing = area_cell_scores(cells.assign(easting=1e6), GEOMS, IDS, KINDS)
+    assert nothing.empty
