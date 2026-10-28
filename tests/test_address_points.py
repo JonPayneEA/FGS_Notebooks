@@ -94,3 +94,12 @@ def test_output_areas_with_people_but_no_points_get_a_centre_point_and_nothing_i
     assert rep["areas_without_points"] == 2 and rep["placed_at_centre"] == 1 and rep["areas_with_no_centre"] == 1
     assert rep["people_placed"] == 7.0 and rep["people_lost"] == 5.0
     assert pts["people"].sum() == 7.0 and list(pts["point_source"]) == ["oa_centroid"] and pts["imd_decile"].iloc[0] == 7
+
+
+def test_nothing_to_place_returns_an_empty_frame_even_when_the_centres_table_has_float_columns(tmp_path):
+    census = pd.DataFrame({"oa": ["E1"], "lsoa": ["L1"], "population": [10], "households": [4], "age65plus": [2]})
+    counts = oa_point_counts(["E1", "E1"])
+    centres = pd.DataFrame({"oa": [], "lsoa": [], "easting": [], "northing": []})        # all float64, as an empty frame is by default
+    imd = pd.DataFrame({"lsoa": ["L1"], "imd_score": [1.0], "imd_decile": [1]})
+    pts, rep = centroid_points(census, counts, centres, imd, str(tmp_path))
+    assert len(pts) == 0 and rep["areas_without_points"] == 0 and "rofrs_rank" in pts.columns

@@ -112,6 +112,14 @@ def centroid_points(census: pd.DataFrame, counts: pd.DataFrame, centres: pd.Data
     are conserved. `centres` has oa, lsoa, easting, northing. Returns (points, report): the report counts areas and people placed, and
     areas with no centre either (their people are lost and are reported)."""
     missing = census[~census["oa"].isin(counts["oa"])]
+    if missing.empty:
+        # nothing to place: every output area has at least one point
+        cols = ["uprn", "easting", "northing", "oa", "lsoa", "lad", "ctyua", "ward", "pcon", "pfa", "rgn", "people", "households", "over65",
+                "cell_key", "imd_score", "imd_decile", "point_source", "tile", *(sources or HAZARD_SOURCES).values()]
+        return pd.DataFrame(columns=cols), {"areas_without_points": 0, "placed_at_centre": 0, "people_placed": 0.0,
+                                            "areas_with_no_centre": 0, "people_lost": 0.0}
+    centres = centres.assign(oa=centres["oa"].astype(str))
+    missing = missing.assign(oa=missing["oa"].astype(str))
     placed = missing.drop(columns=["lsoa"], errors="ignore").merge(centres[["oa", "lsoa", "easting", "northing"]], on="oa", how="inner")
     lost = missing[~missing["oa"].isin(centres["oa"])]
     d = pd.DataFrame({
