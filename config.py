@@ -361,6 +361,8 @@ TBL_AREA_OVERLAPS       = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_area_overlaps"     
 TBL_AREA_CONST_EXPOSURE = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_area_constituency_exposure" # job 35: each area split by constituency (addresses, people, people in High or Medium)
 TBL_AREA_COVERAGE       = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_area_coverage"             # job 35: distinct people covered by any warning (or alert) area, against all, so the gap is visible
 TBL_CONST_EXPOSURE      = f"{CATALOG}.{RESTRICTED_SCHEMA}.constituency_flood_exposure"  # job 35: per constituency, people by band and how many are in a warning or alert area
+TBL_GEOGRAPHY_NAMES    = f"{CATALOG}.{SCHEMA}.responder_geography_names"                 # job 32: geography, code, name, source (open data: names and codes only)
+TBL_GEOGRAPHY_EXPOSURE = f"{CATALOG}.{RESTRICTED_SCHEMA}.geography_flood_exposure"      # job 32: people by rivers and sea band, Flood Zone and critical sites, for each local authority, police force and so on
 GRID_CELL_M = 100          # the cell size of the British National Grid layer (see utils/grid100.py; changing it changes every key)
 # The composite score per cell: hazard (worse of the rivers and sea and the surface water band) times a weighted mix of these three.
 # The weights are normalised, so only their proportions matter. The layers are always stored; the score is never the only output.
