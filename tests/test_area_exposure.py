@@ -11,7 +11,7 @@ from shapely.geometry import box
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.area_exposure import (  # noqa: E402
-    UNIQUE_SPLIT, VALUE_COLS, combine_tiles, constituency_with_gap, coverage_with_gap, finish_areas, point_values, site_stats, tile_stats, to_bng_polygons,
+    UNIQUE_SPLIT, VALUE_COLS, combine_tiles, constituency_with_gap, coverage_with_gap, finish_areas, point_values, site_membership, site_stats, tile_stats, to_bng_polygons,
 )
 from utils.grid_build import points_to_cells  # noqa: E402
 
@@ -180,3 +180,14 @@ def test_a_repair_that_leaves_only_a_line_is_reported_not_returned_as_a_polygon(
     collapsed = '{"type":"Polygon","coordinates":[[[-1.6,53.7],[-1.6,53.7],[-1.6,53.7],[-1.6,53.7]]]}'      # every point the same: no area
     geoms, status = to_bng_polygons([collapsed])
     assert status[0] != "ok" and geoms[0] is None
+
+
+def test_site_membership_lists_each_site_in_each_area_with_its_band_worst_first():
+    sites = pd.DataFrame({"site_id": ["a", "b", "c", "d"], "name": ["Annexe", "School", "Substation", "Far"], "site_group": ["health", "education", "utilities", "emergency"],
+                          "site_type": ["Hospital", "School", "Electricity", "Fire"], "easting": [100.0, 500.0, 950.0, 5000.0], "northing": [100.0] * 4, "rofrs_rank": [3, 4, 0, 4]})
+    m = site_membership(sites, GEOMS, IDS, KINDS)
+    a = m[m["area_id"] == "A"]
+    assert list(a["name"]) == ["School", "Annexe"] and list(a["band"]) == ["High", "Medium"]       # worst band first
+    assert len(m[m["name"] == "School"]) == 3                                                         # in both warnings and the alert
+    assert "Far" not in set(m["name"]) and m[m["name"] == "Substation"]["band"].iloc[0] == "None"
+    assert site_membership(sites.iloc[0:0], GEOMS, IDS, KINDS).empty

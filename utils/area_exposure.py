@@ -245,6 +245,24 @@ def site_stats(sites: pd.DataFrame, geoms, area_ids, kinds) -> pd.DataFrame:
     return _sum_by(D, ["kind", "area_id"], cols)
 
 
+SITE_BAND = {4: "High", 3: "Medium", 2: "Low", 1: "Very Low"}
+
+
+def site_membership(sites: pd.DataFrame, geoms, area_ids, kinds) -> pd.DataFrame:
+    """One row per critical site inside an area (a site in two areas has two rows): the area, the site's name, group and type, and its rivers and
+    sea band. `sites` has site_id, name, site_group, site_type, easting, northing, rofrs_rank. The list the app shows under an area."""
+    cols = ["kind", "area_id", "site_id", "name", "site_group", "site_type", "band", "rofrs_rank", "easting", "northing"]
+    if sites is None or not len(sites):
+        return pd.DataFrame(columns=cols)
+    tree = shapely.STRtree(np.asarray(geoms, dtype=object))
+    pi, ai = tree.query(shapely.points(sites["easting"].to_numpy(dtype="float64"), sites["northing"].to_numpy(dtype="float64")), predicate="intersects")
+    d = sites.iloc[pi].reset_index(drop=True).copy()
+    d["kind"], d["area_id"] = np.asarray(kinds, dtype=object)[ai], np.asarray(area_ids, dtype=object)[ai]
+    d["rofrs_rank"] = pd.to_numeric(d["rofrs_rank"], errors="coerce").fillna(0).astype(int)
+    d["band"] = d["rofrs_rank"].map(SITE_BAND).fillna("None")
+    return d[cols].sort_values(["kind", "area_id", "rofrs_rank", "name"], ascending=[True, True, False, True]).reset_index(drop=True)
+
+
 def coverage_with_gap(cov_sum: pd.DataFrame) -> pd.DataFrame:
     """The summed coverage frame (index kind: 'all', 'flood_warning', 'flood_alert') as rows with the gap added: the people, and the people in the
     rivers and sea High or Medium band, that no area of the kind covers."""
