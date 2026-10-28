@@ -83,3 +83,14 @@ def test_the_iod_columns_are_found_by_text_and_domain_deciles_are_kept():
         assert False
     except ValueError as e:
         assert "Columns present" in str(e)
+
+
+def test_the_households_table_with_no_total_in_its_column_name_is_read():
+    # the real ts041 header, as shown by the first run of job 29
+    ts001 = pd.DataFrame({"geography code": ["E00000001"], "Residence type: Total; measures: Value": [300]})
+    ts007a = pd.DataFrame({"geography code": ["E00000001"], "Age: Total": [300], "Age: Aged 65 to 69 years": [50]})
+    ts041 = pd.DataFrame({"date": [2021], "geography": ["x"], "geography code": ["E00000001"],
+                          "Number of households: Number of households; measures: Value": [120]})
+    t, rep = census_oa_table(ts001, ts007a, ts041)
+    assert t.set_index("oa").loc["E00000001", "households"] == 120
+    assert "Number of households" in rep["households_column"]
