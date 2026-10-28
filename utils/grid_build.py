@@ -35,6 +35,7 @@ SHARE_COLUMNS = {
     ("flood_zones_sea", "FZ3"): "share_fz3_sea", ("flood_zones_river", "FZ3"): "share_fz3_river", ("flood_zones_river_and_sea", "FZ3"): "share_fz3_both",
 }
 CRITICAL_GROUPS = ("health", "education", "emergency", "utilities")
+CRITICAL_COLUMNS = ("critical_sites", *(f"critical_{g}" for g in CRITICAL_GROUPS), "critical_in_rs_high_medium")
 
 
 def points_to_cells(points: pd.DataFrame) -> pd.DataFrame:
@@ -111,6 +112,10 @@ def build_grid(people: pd.DataFrame, shares: pd.DataFrame, critical: pd.DataFram
     g = people.merge(shares, on="cell_key", how="outer")
     if critical is not None and len(critical):
         g = g.merge(critical, on="cell_key", how="outer")
+    # the critical site columns always exist, zero where there are no sites (or no critical sites table yet), so the layout never changes
+    for c in CRITICAL_COLUMNS:
+        if c not in g:
+            g[c] = 0.0
     for c in g.columns:
         if c not in ("cell_key", "imd_score", "imd_decile"):
             g[c] = g[c].fillna(0.0)

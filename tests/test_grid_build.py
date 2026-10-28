@@ -75,3 +75,11 @@ def test_the_score_needs_a_hazard_and_uses_a_national_population_percentile():
     out = add_score(g, {"pop": 0.4, "vulnerability": 0.3, "critical": 0.3}).set_index("cell_key")
     assert out.loc[K1, "risk_score"] > 0 and out.loc[K2, "risk_score"] == 0      # K2 has people but no hazard
     assert out.loc[K1, "pop_pct"] == 1.0 and 0 < out.loc[K2, "pop_pct"] < 1
+
+
+def test_the_critical_site_columns_always_exist_even_with_no_critical_sites_table():
+    g = build_grid(points_to_cells(pts()), pd.DataFrame({"cell_key": np.array([], dtype="int64")}))
+    for c in ("critical_sites", "critical_health", "critical_education", "critical_emergency", "critical_utilities", "critical_in_rs_high_medium"):
+        assert c in g and (g[c] == 0).all()
+    out = add_score(g, {"pop": 0.4, "vulnerability": 0.3, "critical": 0.3})
+    assert "risk_score" in out
