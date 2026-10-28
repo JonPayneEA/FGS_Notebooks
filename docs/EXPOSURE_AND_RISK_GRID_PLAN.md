@@ -7,7 +7,7 @@ Status: plan and foundation only. Nothing here has run against real data. Englan
 For every flood warning area and flood alert area, and for every constituency:
 
 - **People.** Population, households, people aged 65 and over, and deprivation (IoD2025), from Census 2021.
-- **Risk zones.** How much of the area, and how many people, properties and critical sites, sit in each NaFRA2 band (High, Medium, Low, Very Low), for **rivers and the sea** and for **surface water** separately. Flood Zones 2 and 3 as a second view.
+- **Risk zones.** How much of the area, and how many people, properties and critical sites, sit in each NaFRA2 band (High, Medium, Low, Very Low) for **rivers and the sea**, with Flood Zones 2 and 3 as a second view split into coastal and fluvial. Surface water is not part of the first release (see "Coastal, fluvial and surface water").
 - **Critical sites.** Counts by group (health and care, education, emergency services and prisons, utilities and hazardous sites), and by risk band.
 - **A gridded risk product.** A 100 m British National Grid layer holding all of the above per cell, with an adjustable composite score on top. The layers are always stored. The score is never the only thing kept.
 
@@ -21,7 +21,7 @@ A mock-up with invented numbers, in the app's design, is in `docs/EXPOSURE_MOCKU
 |---|---|
 | Method | **Points first, grid second.** Where address or receptor points are held, the sums are made from the points (exact point in area, band looked up at the point). The 100 m British National Grid is the aggregation and product layer, and carries the layers that have no points. |
 | Grid | 100 m British National Grid. Cell key = (northing // 100) * 10,000 + (easting // 100). |
-| Risk zones | NaFRA2 bands, rivers and sea and surface water kept separate. Flood Zones 2 and 3 added as a second view, split by mapping source into coastal (sea), fluvial (river) and mapped together. See "Coastal, fluvial and surface water". |
+| Risk zones | NaFRA2 rivers and sea bands, and Flood Zones 2 and 3 split by mapping source into coastal (sea), fluvial (river) and mapped together. Surface water is out of the first release. See "Coastal, fluvial and surface water". |
 | Critical sites | All four groups: health and care, education, emergency services and prisons, utilities and hazardous sites. |
 | Score | Layers first, plus a simple adjustable score. Weights in `config.RISK_SCORE_WEIGHTS`. |
 | Big Environment Agency datasets | May already be governed tables, so notebooks read a table name or a file path from a widget, whichever you have. |
@@ -32,10 +32,16 @@ A mock-up with invented numbers, in the app's design, is in `docs/EXPOSURE_MOCKU
 These are three different hazards. They are kept apart in every table and in the app, and are never added or merged without saying so.
 
 - **Warning and alert areas are for coastal and fluvial risk.** Each area already carries its type from the EA feed (`river_or_sea`, `is_tidal`, and the code: fluvial, coastal or tidal). Exposure for a warning area is reported against **rivers and sea** first, labelled with that type.
-- **Surface water is context, not a warning basis.** It is shown in its own column and chart, marked as not part of what a warning area is issued for, and it is left out of the composite score by default.
+- **Surface water is not part of the warning area work.** The FGS issues surface water risk, but acting on it is not yet the Agency's responsibility, and warning and alert areas are not issued for it. So the first release has no surface water columns, no surface water in the score, and job 30 does not run it by default. It is a separate, later piece, below.
 - **The NaFRA2 Risk of Flooding from Rivers and Sea layer is one layer.** It does not say which cell is coastal and which fluvial. The area's type gives the reading: a coastal area's band is mainly sea risk, a fluvial area's mainly river risk, and a tidal river area both.
 - **Flood Zones 2 and 3 do say.** They carry a mapping source, so job 30 writes them split into sea (coastal), river (fluvial) and river and sea mapped together, as well as all together. That is the only true coastal against fluvial split in the data we hold.
 - **Where an area's type is mixed** (a warning area with both tidal and river sources), the figures are reported once against rivers and sea, never summed across types.
+
+### Later: what sits under the FGS surface water risk polygons
+
+The useful question is about the FGS's own surface water risk polygons, not the warning areas: which places and people lie under a polygon, and where within it the risk is highest (the Risk of Flooding from Surface Water High and Medium bands). The machinery is the same (job 30 with `source = rofsw`, then points looked up in the rasters), so the exposure counts are not the hard part: people, households, over-65s, deprivation and critical sites under each polygon, split by surface water band.
+
+The large part is richer context: what land use and buildings sit under the polygons, and which areas are most at risk. That is open-ended and is deliberately not planned yet. Decide the question first, then build only what answers it. Costs to know: the surface water source is about 85 GB with its depth files (the band files alone are far less), and the FGS polygons would need the same point-in-polygon step against `fgs_risk_polygons`.
 
 ## Units and how each number is made
 
@@ -44,7 +50,7 @@ These are three different hazards. They are kept apart in every table and in the
 **With address or receptor points** (OS AddressBase, the ONS UPRN directory, the EA National Receptor Database, subject to your licence):
 - **People and households.** Each output area's Census totals are shared among the residential address points inside it (`allocate_to_points`), so people sit where the buildings are. An output area with totals but no residential point is reported as unallocated and placed over its cells instead.
 - **Warning areas.** Exact point in polygon (`points_in_areas`). No grid, no 50 m error. This matters most for small areas.
-- **Flood bands.** Looked up at the point, separately for rivers and sea and for surface water.
+- **Flood bands.** Looked up at the point in the rivers and sea raster and in the Flood Zone rasters.
 - **Deprivation.** The LSOA decile comes with the point.
 - **Properties at risk.** Counted from the points (or the NaFRA2 receptor counts where the Agency's own assessment is preferred).
 - **Critical sites.** Points in the same way.
@@ -124,7 +130,7 @@ The same rule applies to the forecast polygons, which overlap by source and day:
 Each is a notebook under `jobs/`, manual or on a slow cadence. Address-level tables go in the restricted schema; aggregates in the unrestricted one.
 
 1. **29 load_census_deprivation** (built, not yet run): Census 2021 counts by output area (Nomis bulk tables ts001, ts007a, ts041) and the IoD2025 by LSOA. Writes `census2021_oa` and `imd2025_lsoa`. No boundaries are needed: with address points, the output area code comes with each point.
-2. **30 build_hazard_rasters** (built, not yet run): the present-day NaFRA2 band polygons (rivers and sea, surface water) and Flood Zones 2 and 3 are painted onto 10 m rasters, one per 50 km tile, with the worst band winning at a pixel. It writes the rasters to a volume (job 33 reads a band at each address from them) and `hazard_cells_100m`, the share of each 100 m cell in each band. Only the four-band and extent files are used; the depth and hazard files and the Climate_Change folders are skipped for now. A point's band is within 7 m of the polygon edge. The source layout was confirmed by the survey: polygons with a `Risk_band` of High, Medium, Low or Very low, in British National Grid, tiled by OS grid reference.
+2. **30 build_hazard_rasters** (built, not yet run): the present-day NaFRA2 band polygons (rivers and sea) and Flood Zones 2 and 3 (surface water only when asked for, later) are painted onto 10 m rasters, one per 50 km tile, with the worst band winning at a pixel. It writes the rasters to a volume (job 33 reads a band at each address from them) and `hazard_cells_100m`, the share of each 100 m cell in each band. Only the four-band and extent files are used; the depth and hazard files and the Climate_Change folders are skipped for now. A point's band is within 7 m of the polygon edge. The source layout was confirmed by the survey: polygons with a `Risk_band` of High, Medium, Low or Very low, in British National Grid, tiled by OS grid reference.
 3. **31 load_critical_sites**: one standard `critical_sites` table (site id, group, type, name, coordinates, source). Interim sources now; AddressBase Premium classification when access is granted (see above).
 4. **32 load_responder_geographies**: combined authority, local authority, police and fire areas, and lookups.
 5. **33 build_address_points**: address points (from NSUL; residential only once AddressBase is available) with output area, LSOA, deprivation decile, each warning area and flood band they fall in, and their share of the Census totals. Restricted schema.
