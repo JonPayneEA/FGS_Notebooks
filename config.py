@@ -350,8 +350,12 @@ MIN_MPS             = 600    # A refresh returning fewer than this is rejected
 # -----------------------------------------------------------------------------
 TBL_CENSUS_OA = f"{CATALOG}.{SCHEMA}.census2021_oa"          # job 29: Census 2021 by output area (England): population, households, people aged 65 and over
 TBL_IMD_LSOA  = f"{CATALOG}.{SCHEMA}.imd2025_lsoa"          # job 29: English Indices of Deprivation 2025 by LSOA: score, rank, decile
+TBL_HAZARD_CELLS = f"{CATALOG}.{SCHEMA}.hazard_cells_100m"  # job 30: per 100 m cell and band, the share of the cell in that band; source is rofrs, rofsw or flood_zones
+HAZARD_RES_M = 10          # the raster resolution the flood polygons are painted at (point lookups are within 7 m of a polygon edge)
+HAZARD_RASTER_DIR = f"/Volumes/{CATALOG}/{SCHEMA}/{EXTERNAL_VOLUME}/hazard_rasters"   # job 30: one .npz per source and 50 km tile; job 33 samples them at address points
 GRID_CELL_M = 100          # the cell size of the British National Grid layer (see utils/grid100.py; changing it changes every key)
 # The composite score per cell: hazard (worse of the rivers and sea and the surface water band) times a weighted mix of these three.
 # The weights are normalised, so only their proportions matter. The layers are always stored; the score is never the only output.
 RISK_SCORE_WEIGHTS = {"pop": 0.4, "vulnerability": 0.3, "critical": 0.3}
+RISK_SCORE_INCLUDE_SURFACE = False   # flood warning areas are for rivers, the sea and tidal waters: surface water is shown separately and left out of the score unless this is True
 RISK_SCORE_CRITICAL_CAP = 3   # critical sites in a cell beyond this add nothing more to the score

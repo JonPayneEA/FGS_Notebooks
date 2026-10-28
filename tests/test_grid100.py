@@ -74,6 +74,15 @@ def test_the_score_needs_a_hazard_and_rises_with_exposure_vulnerability_and_crit
     assert (risk_score(g.drop(columns=["critical_sites"]), {"pop": 1}) >= 0).all()     # a missing column counts as zero
 
 
+def test_surface_water_is_left_out_of_the_score_unless_asked_for():
+    g = pd.DataFrame({"haz_rs": [0, 0, 4], "haz_sw": [0, 4, 4], "population": [500, 500, 500], "imd_decile": [1, 1, 1], "critical_sites": [3, 3, 3]})
+    w = {"pop": 0.4, "vulnerability": 0.3, "critical": 0.3}
+    default = risk_score(g, w)
+    assert default[1] == 0 and default[2] > 0                         # surface water alone scores nothing by default
+    with_sw = risk_score(g, w, include_surface=True)
+    assert with_sw[1] > 0 and with_sw[2] == default[2]                # and counts when asked; the worse of the two never lowers a score
+
+
 def nested_example():
     # An alert area A covers cells 1 to 6. Two warning areas sit inside it: W1 on cells 2, 3 and W2 on cells 3, 4 (they overlap on 3).
     area_cells = pd.DataFrame({"id": ["A"] * 6 + ["W1", "W1", "W2", "W2"], "cell_key": [1, 2, 3, 4, 5, 6, 2, 3, 3, 4]})

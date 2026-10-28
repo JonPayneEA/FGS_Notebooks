@@ -266,10 +266,11 @@ def area_overlap_stats(grid: pd.DataFrame, area_cells: pd.DataFrame, meta: pd.Da
     return out.fillna(0).reset_index()
 
 
-def risk_score(grid: pd.DataFrame, weights: dict, crit_cap: int = 3) -> pd.Series:
+def risk_score(grid: pd.DataFrame, weights: dict, crit_cap: int = 3, include_surface: bool = False) -> pd.Series:
     """
-    The composite score, 0 to 100, for each cell. The hazard (the worse of the rivers and sea band and the surface water band, 0 to 4)
-    scales everything: no hazard, no score. Inside it three things add, weighted by `weights` (pop, vulnerability, critical; they are
+    The composite score, 0 to 100, for each cell. The hazard scales everything: no hazard, no score. By default it is the rivers and
+    sea band only (0 to 4), because flood warning and alert areas are issued for rivers, the sea and tidal waters, not for surface
+    water. With include_surface it is the worse of the rivers and sea band and the surface water band. Inside it three things add, weighted by `weights` (pop, vulnerability, critical; they are
     normalised to sum to one):
       pop             the cell's population as a share of the busiest populated cell's percentile (0 to 1)
       vulnerability   the deprivation decile turned round, so decile 1 (most deprived) is 1 and decile 10 is 0.1
@@ -280,7 +281,7 @@ def risk_score(grid: pd.DataFrame, weights: dict, crit_cap: int = 3) -> pd.Serie
         return pd.to_numeric(grid[name], errors="coerce").fillna(0) if name in grid else pd.Series(0.0, index=grid.index)
     w = {k: float(weights.get(k, 0)) for k in ("pop", "vulnerability", "critical")}
     total = sum(w.values()) or 1.0
-    haz = np.maximum(col("haz_rs"), col("haz_sw")).clip(0, 4) / 4.0
+    haz = (np.maximum(col("haz_rs"), col("haz_sw")) if include_surface else col("haz_rs")).clip(0, 4) / 4.0
     pop = col("population")
     pop_pct = pop.rank(pct=True).where(pop > 0, 0.0)
     dec = col("imd_decile")
