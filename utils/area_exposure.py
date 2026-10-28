@@ -38,6 +38,12 @@ KINDS = ("flood_warning", "flood_alert")
 SOURCE_BY_CODE = {"F": "fluvial", "C": "coastal", "T": "tidal", "G": "groundwater", "B": "fluvial and coastal"}
 
 
+# Which address point column holds the code of each geography responders work to (the same names as job 32's GEOGRAPHIES).
+GEO_COLUMNS = {"local_authority_district": "lad", "county_or_unitary": "ctyua", "ward": "ward", "constituency": "pcon",
+               "police_force_area": "pfa", "region": "rgn"}
+GEO_VALUE_COLS = ["addresses", "people", "households", "over65", "people_rs_high_medium"]
+
+
 def point_values(points: pd.DataFrame) -> pd.DataFrame:
     """The measures carried by each address point, one column each (float). `points` has people, households, over65, imd_decile, rofrs_rank and
     the fz_*_rank columns. `addresses` is 1 for a real address and 0 for an output area centre point (which carries people but is not an address)."""
@@ -133,6 +139,7 @@ def tile_stats(points: pd.DataFrame, geoms, area_ids, kinds, min_pair_people: fl
       area      (kind, area_id): gross VALUE_COLS, then <measure>_unique and <measure>_split for UNIQUE_SPLIT
       pairs     (kind, area_a, area_b): shared addresses and people (a < b)
       area_pcon (kind, area_id, pcon): addresses, people, households, over65, people_rs_high_medium, people_fz3
+      area_geo  (kind, area_id, geography, code): addresses, people, households, over65, people_rs_high_medium, for every geography in GEO_COLUMNS
       coverage  (kind): the distinct total covered by any area of the kind, and 'all' (every point), for the gap
       pcon      (pcon): all points, and those covered by a warning and by an alert area, for the gap by constituency
     """
@@ -178,6 +185,18 @@ def tile_stats(points: pd.DataFrame, geoms, area_ids, kinds, min_pair_people: fl
     AP["kind"], AP["area_id"], AP["pcon"] = pairs["kind"].to_numpy(), pairs["area_id"].to_numpy(), pcon[pi]
     area_pcon = _sum_by(AP, ["kind", "area_id", "pcon"], ap_cols)
 
+    # each area split by every geography responders work to (district, county, ward, constituency, police force, region)
+    geo_parts = []
+    for geography, col in GEO_COLUMNS.items():
+        if col not in points:
+            continue
+        code = points[col].astype("object").where(points[col].notna(), "").to_numpy()
+        G = pd.DataFrame(vals[GEO_VALUE_COLS].to_numpy()[pi], columns=GEO_VALUE_COLS)
+        G["kind"], G["area_id"], G["geography"], G["code"] = pairs["kind"].to_numpy(), pairs["area_id"].to_numpy(), geography, code[pi]
+        geo_parts.append(_sum_by(G, ["kind", "area_id", "geography", "code"], GEO_VALUE_COLS))
+    area_geo = (pd.concat(geo_parts) if geo_parts else
+                pd.DataFrame(columns=GEO_VALUE_COLS, index=pd.MultiIndex.from_arrays([[], [], [], []], names=["kind", "area_id", "geography", "code"])))
+
     # the distinct total covered by any area of a kind, against every point
     cov_cols = ["addresses", "people", "households", "over65", "people_rs_high_medium", "households_rs_high_medium", "people_fz3"]
     cov_rows = {"all": vals[cov_cols].sum()}
@@ -199,7 +218,7 @@ def tile_stats(points: pd.DataFrame, geoms, area_ids, kinds, min_pair_people: fl
             PC[f"{c}_in_{short}_area"] = vals[c].where(flag, 0.0)
     pc_cols = [c for c in PC.columns if c != "pcon"]
     pcon_tot = _sum_by(PC, "pcon", pc_cols)
-    return {"area": area, "pairs": prs, "area_pcon": area_pcon, "coverage": coverage, "pcon": pcon_tot}
+    return {"area": area, "pairs": prs, "area_pcon": area_pcon, "area_geo": area_geo, "coverage": coverage, "pcon": pcon_tot}
 
 
 def combine_tiles(parts, key_levels) -> pd.DataFrame:
@@ -261,6 +280,20 @@ def site_membership(sites: pd.DataFrame, geoms, area_ids, kinds) -> pd.DataFrame
     d["rofrs_rank"] = pd.to_numeric(d["rofrs_rank"], errors="coerce").fillna(0).astype(int)
     d["band"] = d["rofrs_rank"].map(SITE_BAND).fillna("None")
     return d[cols].sort_values(["kind", "area_id", "rofrs_rank", "name"], ascending=[True, True, False, True]).reset_index(drop=True)
+
+
+def finish_area_geographies(area_geo: pd.DataFrame, exposure: pd.DataFrame, names: pd.DataFrame = None) -> pd.DataFrame:
+    """The summed area by geography frame as rows: the responder's name (from `names`: geography, code, name), and the share of the area's people
+    in it. Rows with no code (points outside the lookup) are dropped. Biggest share first within each area and geography."""
+    g = area_geo.reset_index()
+    g = g[g["code"].astype(str).str.len() > 0]
+    if names is not None and len(names):
+        g = g.merge(names[["geography", "code", "name"]].drop_duplicates(["geography", "code"]), on=["geography", "code"], how="left")
+    else:
+        g["name"] = None
+    tot = exposure.set_index(["kind", "area_id"])["people"]
+    g["share_of_area_people"] = (g["people"] / tot.reindex(pd.MultiIndex.from_frame(g[["kind", "area_id"]])).to_numpy()).round(4)
+    return g.sort_values(["kind", "area_id", "geography", "people"], ascending=[True, True, True, False]).reset_index(drop=True)
 
 
 def coverage_with_gap(cov_sum: pd.DataFrame) -> pd.DataFrame:
