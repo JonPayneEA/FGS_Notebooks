@@ -28,6 +28,47 @@ COLUMNS = ["site_id", "site_group", "site_type", "name", "easting", "northing", 
 SUBSTATION_MIN_VOLT = 66_000
 
 
+BROWSER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+# Ways of asking the NHS ODS API for JSON, tried in turn. The API answered "406 Not Acceptable" to the first two attempts we made (no Accept
+# header; Accept application/json), so the cause is not known: the documentation says the format defaults to JSON and can be forced with the
+# _format parameter, and a gateway can also refuse an unfamiliar client name. The variant that works is kept for the rest of the run.
+ODS_VARIANTS = (
+    ("_format=json", {}, {"_format": "json"}),
+    ("Accept application/json", {"Accept": "application/json"}, {}),
+    ("browser client", {"User-Agent": BROWSER_AGENT, "Accept": "*/*"}, {}),
+    ("browser client with _format=json", {"User-Agent": BROWSER_AGENT, "Accept": "*/*"}, {"_format": "json"}),
+    ("a smaller page", {"User-Agent": BROWSER_AGENT, "Accept": "*/*"}, {"_format": "json", "_small": "1"}),
+)
+
+
+def fetch_ods_role(get, role: str, page: int = 1000, base: str = "https://directory.spineservices.nhs.uk/ORD/2-0-0/organisations", variants=ODS_VARIANTS):
+    """All active organisations with an ODS primary role. `get(url, params, headers)` returns a response with status_code, text and json().
+    Each variant is tried for the first page until one answers 200; that one is then used for every further page. If none works, the error
+    lists each attempt with its status and the start of the reply, so the cause can be seen. Returns (organisations, the variant that worked)."""
+    attempts, chosen = [], None
+    for label, headers, extra in variants:
+        params = {"PrimaryRoleId": role, "Status": "Active", "Limit": page if "_small" not in extra else 100, "Offset": 0,
+                  **{k: v for k, v in extra.items() if k != "_small"}}
+        r = get(base, params, headers)
+        if r.status_code == 200:
+            chosen = (label, headers, extra, params["Limit"])
+            first = r.json().get("Organisations", [])
+            break
+        attempts.append(f"{label}: {r.status_code} {str(r.text)[:120]!r}")
+    if chosen is None:
+        raise RuntimeError("the NHS ODS API refused every variant. " + " | ".join(attempts))
+    label, headers, extra, limit = chosen
+    out, offset, orgs = list(first), 0, first
+    while len(orgs) >= limit:
+        offset += limit
+        params = {"PrimaryRoleId": role, "Status": "Active", "Limit": limit, "Offset": offset, **{k: v for k, v in extra.items() if k != "_small"}}
+        r = get(base, params, headers)
+        r.raise_for_status() if hasattr(r, "raise_for_status") else None
+        orgs = r.json().get("Organisations", [])
+        out.extend(orgs)
+    return out, label
+
+
 def normalise_postcode(s):
     return pd.Series(s, dtype="object").astype(str).str.upper().str.replace(r"\s+", "", regex=True).replace({"NONE": "", "NAN": ""})
 
