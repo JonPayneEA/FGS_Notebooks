@@ -94,7 +94,7 @@ The same rule applies to the forecast polygons, which overlap by source and day:
 
 Each is a notebook under `jobs/`, manual or on a slow cadence. Address-level tables go in the restricted schema; aggregates in the unrestricted one.
 
-1. **29 load_census_deprivation**: output areas, Census 2021 counts, IoD2025.
+1. **29 load_census_deprivation** (built, not yet run): Census 2021 counts by output area (Nomis bulk tables ts001, ts007a, ts041) and the IoD2025 by LSOA. Writes `census2021_oa` and `imd2025_lsoa`. No boundaries are needed: with address points, the output area code comes with each point.
 2. **30 load_hazard_layers**: NaFRA2 and Flood Zones, with the sampling that gives the share of a cell in each band.
 3. **31 load_critical_sites**: one standard `critical_sites` table (site id, group, type, name, coordinates, source).
 4. **32 load_responder_geographies**: combined authority, local authority, police and fire areas, and lookups.
