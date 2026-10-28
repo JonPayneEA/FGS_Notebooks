@@ -259,6 +259,11 @@ HEALTH_MP_FAIL_DAYS        = 21
 # spell, not the pipeline failing, and it must not fail the polling run that carries the
 # FGS and warnings alerts.
 HEALTH_LIVE_WARN_HOURS     = 1
+# the exposure products (jobs 29 to 35) are rebuilt by hand when the hazard maps, the address points or the areas change, so they are old
+# by design between rebuilds. The check warns, never fails, because a stale exposure table must not fail the polling run.
+HEALTH_EXPOSURE_WARN_DAYS  = 180
+HEALTH_EXPOSURE_PEOPLE_MIN = 55_000_000      # England's Census 2021 population is 56.49 million; a total far outside this means a broken join
+HEALTH_EXPOSURE_PEOPLE_MAX = 58_000_000
 
 # -----------------------------------------------------------------------------
 # SPATIAL INTERSECTION THRESHOLDS
