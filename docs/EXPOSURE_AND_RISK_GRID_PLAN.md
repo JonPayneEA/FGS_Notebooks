@@ -77,7 +77,10 @@ The same rule applies to the forecast polygons, which overlap by source and day:
 | Deprivation | English Indices of Deprivation 2025 (MHCLG, published 30 October 2025, 33,755 LSOAs) | Download by the notebook | Not comparable with 2019 |
 | Risk of Flooding from Rivers and Sea, from Surface Water (NaFRA2, January 2025) | Environment Agency | Governed table or volume file, by widget | **Format unknown**: vector or raster, to be found by the inspect step |
 | Flood Zones 2 and 3 | Environment Agency (Flood Map for Planning; only some products are open) | Governed table or volume file | Licence to confirm |
-| Address or receptor points | OS AddressBase, the ONS UPRN directory (which gives each UPRN its output area and LSOA), or the EA National Receptor Database | Governed table, restricted schema | **You believe you have access.** Which tables, and the licence terms, to confirm |
+| Address points | ONS National Statistics UPRN Lookup (NSUL, Epoch 121, October 2025): UPRN, grid reference, 2021 output area, local authority, police force area, by region file | Governed volume, readable now | **Used.** England region files only |
+| Critical sites (interim) | OpenStreetMap UK (`.osm.pbf`), DfE Get Information About Schools, NHS ODS API | Governed volume and downloads | **Used until AddressBase access arrives.** Coverage is uneven, see below |
+| Critical sites and residential split (target) | OS AddressBase Premium classification codes (restricted) | Governed volume, restricted | **Major improvement, blocked.** No read access yet, see below |
+| Receptors | EA National Receptor Database | Governed table | Not found in the survey; optional |
 | Properties at risk | NaFRA2 receptor counts or the National Receptor Database | Governed table | Which table |
 | Hospitals, GP surgeries | NHS Organisation Data Service | Download | Needs postcodes turned into coordinates (ONS postcode directory) |
 | Care homes | CQC directory | Download or API | Coordinates supplied |
@@ -85,6 +88,22 @@ The same rule applies to the forecast polygons, which overlap by source and day:
 | Fire, police, ambulance stations, prisons | Mixed public sources | To be chosen | Open sources are patchy: check completeness |
 | Electricity substations, water and sewage works, COMAH sites | Mixed; possibly EA internal | Governed table if you have it | **Needed from you** |
 | Combined authority, local authority, police and fire areas | ONS Open Geography Portal | Download | Local resilience forums: source not yet found |
+
+## Major improvement pending: AddressBase Premium
+
+**Status: access denied.** The survey returned `PERMISSION_DENIED ... does not have READ VOLUME on Volume 'prd_dash_bronze.ordnance_survey_data_hub_restricted.addressbase_premium'`. Access needs the Access Approver's agreement and a MyIT "Access to restricted data" request, and will take a while. The pipeline is built to work without it and to switch over when it arrives.
+
+**What it would add, and why it matters:**
+- **Critical sites from one national, consistent source.** The classification table (about 45 million rows) marks hospitals, surgeries, care homes, schools, nurseries, police, fire and ambulance stations, prisons, substations and water works. The interim sources below are patchier, and this is the largest single gain in quality.
+- **A residential and non-residential split.** Census people are shared over homes only, rather than over every NSUL address, and "homes at risk" becomes a true count.
+- **Currency.** NSUL is Epoch 121 (October 2025) and the AddressBase copy is newer.
+
+**What the interim sources cost:**
+- OpenStreetMap is crowdsourced. Schools and hospitals are well covered, substations and water works less so, and care homes and some emergency sites are undercounted.
+- With NSUL alone, a non-residential address (a shop, an office) counts as a place people live, so population is spread a little too widely in town centres.
+- Every output carries its source in a `source` column, so interim and AddressBase figures are never mixed unseen.
+
+**How the switch works:** job 31 reads a `critical_source` widget (`interim` or `addressbase`). The `critical_sites` table has the same columns either way, so jobs 33 to 35 and the app do not change. Job 33 takes a residential filter from AddressBase when it is available.
 
 ## First step: survey what the workspace holds
 
@@ -96,16 +115,16 @@ Each is a notebook under `jobs/`, manual or on a slow cadence. Address-level tab
 
 1. **29 load_census_deprivation** (built, not yet run): Census 2021 counts by output area (Nomis bulk tables ts001, ts007a, ts041) and the IoD2025 by LSOA. Writes `census2021_oa` and `imd2025_lsoa`. No boundaries are needed: with address points, the output area code comes with each point.
 2. **30 load_hazard_layers**: NaFRA2 and Flood Zones, with the sampling that gives the share of a cell in each band.
-3. **31 load_critical_sites**: one standard `critical_sites` table (site id, group, type, name, coordinates, source).
+3. **31 load_critical_sites**: one standard `critical_sites` table (site id, group, type, name, coordinates, source). Interim sources now; AddressBase Premium classification when access is granted (see above).
 4. **32 load_responder_geographies**: combined authority, local authority, police and fire areas, and lookups.
-5. **33 build_address_points**: residential address points with output area, LSOA, deprivation decile, each warning area and flood band they fall in, and their share of the Census totals. Restricted schema.
+5. **33 build_address_points**: address points (from NSUL; residential only once AddressBase is available) with output area, LSOA, deprivation decile, each warning area and flood band they fall in, and their share of the Census totals. Restricted schema.
 6. **34 build_grid_100m**: the `exposure_grid_100m` table, from the points plus the continuous layers.
 7. **35 warning_area_exposure**: `ea_warning_area_exposure` (gross and equal split), the overlap depth and pair tables, and the constituency roll-up, by band and source.
 8. The app: the Areas section, the extra lines in map popups, constituency figures and the Exports.
 
 ## What I need from you
 
-- **Which point datasets you can use**, and the table names: addresses (AddressBase or the UPRN directory) and receptors (the National Receptor Database). The survey notebook searches for these names. Please also confirm the licence allows a derived exposure grid and area statistics to be shared inside the Agency.
+- **AddressBase Premium access.** Email the Access Approver named in the Data Catalogue entry, then raise "Access to restricted data" in MyIT. Aggregates per warning area are assumed to be permitted; site-level and address-level data stay in the restricted schema regardless.
 - The governed table names for NaFRA2, Flood Zones and any critical-site tables you hold.
 - Whether the cluster can reach the ONS, Nomis, gov.uk, NHS and CQC sites. The survey notebook reports it.
 
@@ -114,5 +133,6 @@ Each is a notebook under `jobs/`, manual or on a slow cadence. Address-level tab
 - With points: an output area's people are shared equally among its residential addresses, which ignores that homes differ in size. Without points: an even spread over cells, not building level.
 - On the grid only: cell-centre ownership gives a 50 m boundary error. Point-based sums have none.
 - The band thresholds assumed are the usual ones (High above 3.3 per cent chance in any year, Medium 1 to 3.3, Low 0.1 to 1, Very Low below 0.1). Confirm against the NaFRA2 documentation.
-- Public critical site lists are incomplete for emergency services and utilities.
+- Interim critical site lists are incomplete for emergency services, utilities and care homes. AddressBase Premium access is the fix and is flagged above as the major improvement.
+- Local resilience forums are out of scope for now.
 - The score is a ranking aid, not a prediction.

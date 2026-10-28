@@ -376,3 +376,9 @@ All fifteen remaining items in one order. Shared dependencies appear once. Nothi
 13. `pdm_ens`: Post-Event, feeds Event Performance Dashboard
 14. `pdm_obs_rain`: Post-Event, feeds Event Performance Dashboard
 15. `pdm_uncertainty`: Post-Event, feeds Event Performance Dashboard
+
+## Major improvement pending: AddressBase Premium access
+
+The exposure and risk grid (`docs/EXPOSURE_AND_RISK_GRID_PLAN.md`) is being built without OS AddressBase Premium, because read access to `prd_dash_bronze.ordnance_survey_data_hub_restricted.addressbase_premium` is not yet granted. Access needs the Access Approver's agreement and a MyIT "Access to restricted data" request.
+
+Granting it would give critical sites from one national classification (health, education, emergency services, utilities) in place of the patchier interim sources, and a residential and non-residential split for population and homes at risk. The pipeline switches with one widget and no downstream change. This is the largest single quality gain available to the exposure work.
