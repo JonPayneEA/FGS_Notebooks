@@ -83,3 +83,16 @@ def test_the_critical_site_columns_always_exist_even_with_no_critical_sites_tabl
         assert c in g and (g[c] == 0).all()
     out = add_score(g, {"pop": 0.4, "vulnerability": 0.3, "critical": 0.3})
     assert "risk_score" in out
+
+
+def test_more_people_scores_higher_when_hazard_and_deprivation_are_equal():
+    # the bug: the score read a column called population, the grid has people, so population counted as zero and these scored the same
+    pts2 = pd.DataFrame({
+        "cell_key": [1, 2, 3], "people": [1.0, 20.0, 60.0], "households": [1.0, 8.0, 25.0], "over65": [0.0, 2.0, 10.0],
+        "imd_score": [50.0, 50.0, 50.0], "imd_decile": [1, 1, 1], "point_source": ["nsul"] * 3,
+        "rofrs_rank": [4, 4, 4], "fz_rank": [0, 0, 0], "fz_sea_rank": [0, 0, 0], "fz_river_rank": [0, 0, 0], "fz_river_and_sea_rank": [0, 0, 0],
+    })
+    g = build_grid(points_to_cells(pts2), pd.DataFrame({"cell_key": [1, 2, 3], "share_rs_high": [1.0, 1.0, 1.0]}))
+    out = add_score(g, {"pop": 0.4, "vulnerability": 0.3, "critical": 0.3}).set_index("cell_key")["risk_score"]
+    assert out[1] < out[2] < out[3]
+    assert out[3] > 30                                                    # more than hazard times deprivation alone

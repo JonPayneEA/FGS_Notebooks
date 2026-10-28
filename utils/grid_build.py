@@ -137,5 +137,7 @@ def add_score(grid: pd.DataFrame, weights: dict, crit_cap: int = 3, include_surf
     g = grid.copy()
     pop = pd.to_numeric(g["people"], errors="coerce").fillna(0)
     g["pop_pct"] = pop.rank(pct=True).where(pop > 0, 0.0).round(4)
-    g["risk_score"] = risk_score(g, weights, crit_cap, include_surface)
+    # grid100.risk_score reads the population from a column named "population"; the grid calls it "people". Without this mapping the
+    # population term silently counted as zero (a missing column is zero), and every flooded deprived cell scored the same.
+    g["risk_score"] = risk_score(g.assign(population=pop), weights, crit_cap, include_surface)
     return g
