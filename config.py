@@ -359,6 +359,7 @@ TBL_EXPOSURE_GRID  = f"{CATALOG}.{RESTRICTED_SCHEMA}.exposure_grid_100m"        
 TBL_AREA_EXPOSURE       = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_area_exposure"             # job 35: one row per flood warning or alert area: gross, unique and split people by band, deprivation, critical sites
 TBL_AREA_OVERLAPS       = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_area_overlaps"             # job 35: each pair of areas of one kind that share addresses, with what they share
 TBL_AREA_CONST_EXPOSURE = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_area_constituency_exposure" # job 35: each area split by constituency (addresses, people, people in High or Medium)
+TBL_AREA_SITES          = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_area_sites"                # job 35: each critical site inside each warning or alert area, with its rivers and sea band
 TBL_AREA_COVERAGE       = f"{CATALOG}.{RESTRICTED_SCHEMA}.ea_area_coverage"             # job 35: distinct people covered by any warning (or alert) area, against all, so the gap is visible
 TBL_CONST_EXPOSURE      = f"{CATALOG}.{RESTRICTED_SCHEMA}.constituency_flood_exposure"  # job 35: per constituency, people by band and how many are in a warning or alert area
 TBL_GEOGRAPHY_NAMES    = f"{CATALOG}.{SCHEMA}.responder_geography_names"                 # job 32: geography, code, name, source (open data: names and codes only)
