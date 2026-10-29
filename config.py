@@ -192,6 +192,8 @@ EA_RT_LIVE_KEEP_DAYS    = 4       # safety net if the archive hand-over (job 10)
 # -----------------------------------------------------------------------------
 FFC_BASE_URL        = "https://api.ffc-environment-agency.fgs.metoffice.gov.uk"
 FFC_STATEMENTS_PATH = "/api/public/v3/statements"
+FFC_RFG_PATH        = "/api/public/v3/rfg"                 # returns {"rfg_updates": [...]}, newest first (page_number, page_size)
+FFC_RFG_LATEST_PATH = "/api/public/v3/rfg/latest"          # one update, or only last_updated and a status when no guidance is current
 FFC_LATEST_PATH     = "/api/public/v3/statements/latest"   # returns {"statement": {...}}
 
 # -----------------------------------------------------------------------------
@@ -380,3 +382,11 @@ GRID_CELL_M = 100          # the cell size of the British National Grid layer (s
 RISK_SCORE_WEIGHTS = {"pop": 0.4, "vulnerability": 0.3, "critical": 0.3}
 RISK_SCORE_INCLUDE_SURFACE = False   # flood warning areas are for rivers, the sea and tidal waters: surface water is shown separately and left out of the score unless this is True
 RISK_SCORE_CRITICAL_CAP = 3   # critical sites in a cell beyond this add nothing more to the score
+
+# ---- Rapid Flood Guidance (jobs 36 and 37) ----------------------------------------------------------------------------------
+TBL_RFG_UPDATES       = f"{CATALOG}.{SCHEMA}.rfg_updates"                                  # job 36: one row per RFG update, and one per "no guidance" state (public)
+TBL_RFG_POLYGONS      = f"{CATALOG}.{SCHEMA}.rfg_polygons"                                 # job 36: one row per polygon per update, GeoJSON, with its latest text and validity (public)
+TBL_RFG_EXPOSURE      = f"{CATALOG}.{RESTRICTED_SCHEMA}.rfg_polygon_exposure"              # job 37: people, households, bands and vulnerability under each polygon (written last: its rows mean the update is done)
+TBL_RFG_CONSTITUENCIES = f"{CATALOG}.{RESTRICTED_SCHEMA}.rfg_polygon_constituencies"       # job 37: each polygon split by constituency
+TBL_RFG_AREAS         = f"{CATALOG}.{RESTRICTED_SCHEMA}.rfg_polygon_areas"                 # job 37: the people of each polygon in each warning or alert area
+TBL_RFG_SITES         = f"{CATALOG}.{RESTRICTED_SCHEMA}.rfg_polygon_sites"                 # job 37: the critical sites inside each polygon
