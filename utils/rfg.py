@@ -158,3 +158,26 @@ def rfg_exposure(points: pd.DataFrame, polys, keys, area_polys=None, area_ids=No
     else:
         out["sites"] = _empty(["polygon_key", "site_id", "name", "site_group", "site_type", "band", "rofrs_rank"])
     return out
+
+
+def merge_exposure(parts) -> dict:
+    """Add up the results of rfg_exposure() run on separate chunks of points (strips of one polygon, or several polygons). The polygon, constituency and area
+    frames are sums, so they are added by their keys; the sites come from whichever chunk held them (each critical site is listed once per polygon).
+    A chunk that held no points still contributes its zero polygon row and its sites."""
+    parts = [r for r in parts if r]
+    keys_poly = ["polygon_key"]
+    out = {}
+    polys = [r["polygon"] for r in parts if len(r["polygon"])]
+    out["polygon"] = (pd.concat(polys, ignore_index=True).groupby(keys_poly, sort=False)[[c for c in polys[0].columns if c != "polygon_key"]].sum().reset_index()
+                      if polys else _empty(["polygon_key", *EXPOSURE_COLS]))
+    for name, keys in (("constituency", ["polygon_key", "pcon"]), ("areas", ["polygon_key", "kind", "area_id", "area_name"])):
+        frames = [r[name] for r in parts if len(r[name])]
+        if frames:
+            d = pd.concat(frames, ignore_index=True)
+            out[name] = d.groupby(keys, sort=False)[[c for c in d.columns if c not in keys]].sum().reset_index()
+        else:
+            out[name] = parts[0][name] if parts else _empty(keys)
+    site_frames = [r["sites"] for r in parts if len(r["sites"])]
+    out["sites"] = (pd.concat(site_frames, ignore_index=True).drop_duplicates(["polygon_key", "site_id"]).reset_index(drop=True) if site_frames
+                    else _empty(["polygon_key", "site_id", "name", "site_group", "site_type", "band", "rofrs_rank"]))
+    return out

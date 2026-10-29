@@ -9,7 +9,7 @@ from shapely.geometry import box
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.rfg import is_present, is_stored, parse_update, polygon_key, rfg_exposure, update_key  # noqa: E402
+from utils.rfg import is_present, is_stored, merge_exposure, parse_update, polygon_key, rfg_exposure, update_key  # noqa: E402
 
 UPDATE = {
     "id": 7, "issued_at": "2023-01-01T10:30:00.752Z", "last_updated": "2023-01-01T11:00:00.000Z", "pdf_url": "http://x/rfg.pdf",
@@ -80,3 +80,24 @@ def test_no_points_or_no_polygons_gives_zero_rows_not_an_error():
     r = rfg_exposure(make_points().iloc[0:0], [box(0, 0, 10, 10)], ["9|1"])
     assert list(r["polygon"]["polygon_key"]) == ["9|1"] and r["polygon"]["people"].iloc[0] == 0 and r["constituency"].empty and r["areas"].empty and r["sites"].empty
     assert rfg_exposure(make_points(), [], [])["polygon"].empty
+
+
+def test_strips_of_points_add_up_to_the_same_answer_as_one_read():
+    pts = make_points()
+    polys = [box(0, 0, 600, 200)]
+    area_polys = [box(0, 0, 350, 200), box(0, 0, 1000, 200)]
+    sites = pd.DataFrame({"site_id": ["s1"], "name": ["School"], "site_group": ["education"], "site_type": ["Primary"], "easting": [150.0], "northing": [100.0], "rofrs_rank": [4], "fz_rank": [0]})
+    args = (polys, ["7|1"], area_polys, ["A", "B"], ["flood_warning", "flood_alert"], ["Area A", "Area B"])
+    whole = rfg_exposure(pts, *args, sites)
+    # the same points in three strips by easting, the sites given once (to the first strip) as the job does
+    strips = [pts[(pts["easting"] >= lo) & (pts["easting"] < hi)] for lo, hi in ((0, 250), (250, 450), (450, 10000))]
+    parts = [rfg_exposure(strips[0], *args, sites)] + [rfg_exposure(x, *args) for x in strips[1:]]
+    m = merge_exposure(parts)
+    assert np.allclose(m["polygon"].set_index("polygon_key").loc["7|1"].to_numpy(dtype=float), whole["polygon"].set_index("polygon_key").loc["7|1"].to_numpy(dtype=float))
+    c = m["constituency"].set_index(["polygon_key", "pcon"])["people"]
+    assert c.loc[("7|1", "P1")] == whole["constituency"].set_index(["polygon_key", "pcon"])["people"].loc[("7|1", "P1")]
+    a = m["areas"].set_index(["polygon_key", "area_id"])["people"]
+    assert a.loc[("7|1", "A")] == 6 and a.loc[("7|1", "B")] == 12
+    assert list(m["sites"]["name"]) == ["School"]
+    empty = merge_exposure([rfg_exposure(pts.iloc[0:0], *args)])
+    assert empty["polygon"]["people"].iloc[0] == 0 and empty["constituency"].empty
