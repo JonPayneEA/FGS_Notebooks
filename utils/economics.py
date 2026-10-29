@@ -23,9 +23,10 @@ import pandas as pd
 SCENARIOS = ("low", "central", "high")
 BANDS = ("high", "medium", "low", "very_low")
 
-# (low, high) annual probability of each band; central is the geometric mean, except High where the range's own middle is 5%
+# (low, high) annual probability of each band; central is the geometric mean, except High, which has no top: 4% is a judgement (most households in the
+# High band sit nearer its bottom edge of 3.3% than the 10% cap), and it is the one to revisit when better evidence is to hand
 BAND_RANGE = {"high": (0.033, 0.10), "medium": (0.01, 0.033), "low": (0.001, 0.01), "very_low": (0.0001, 0.001)}
-CENTRAL_OVERRIDE = {"high": 0.05}
+CENTRAL_OVERRIDE = {"high": 0.04}
 
 COLUMNS = ["item", "scenario", "value", "unit", "source", "price_year", "note", "updated_at"]
 

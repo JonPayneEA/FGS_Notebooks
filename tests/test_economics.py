@@ -17,7 +17,7 @@ def test_defaults_give_a_probability_for_every_band_and_scenario_and_leave_the_d
     assert p["value"].notna().all() and len(p) == 12
     dm = d[d["item"] == "damage_per_household"]
     assert len(dm) == 3 and dm["value"].isna().all()
-    assert central_probability("high") == 0.05 and math.isclose(central_probability("medium"), math.sqrt(0.01 * 0.033))
+    assert central_probability("high") == 0.04 and math.isclose(central_probability("medium"), math.sqrt(0.01 * 0.033))
     assert check_assumptions(d) == []                                     # the seed is internally consistent
 
 
