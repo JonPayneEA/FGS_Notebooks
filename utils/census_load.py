@@ -10,6 +10,9 @@
 #   population   TS001, usual residents, all categories
 #   households   TS041, number of households
 #   age65plus    TS007A, the five-year bands from 65 to 69 upwards (summed; the bands are found by their text)
+#   no_car_households  TS045, households with no car or van (a count of households, not people)
+#   bad_health         TS037, people in bad health plus people in very bad health
+#   limited_lot        TS038, people disabled under the Equality Act whose day-to-day activities are limited a lot
 # IoD2025. The "all ranks, scores, deciles and population denominators" file (File 7), one row per LSOA. Columns are found by text, not
 # position.
 # =============================================================================
@@ -129,6 +132,49 @@ def census_oa_table(ts001: pd.DataFrame, ts007a: pd.DataFrame, ts041: pd.DataFra
         out[c] = pd.to_numeric(out[c], errors="coerce")
     rep["rows"] = int(len(out)); rep["england_rows"] = int(out["oa"].astype(str).str.startswith("E").sum())
     return out, rep
+
+
+def _columns_with(df: pd.DataFrame, *needles, exclude=()) -> list:
+    """Value columns whose normalised text holds every needle and none of the excluded words."""
+    out = []
+    for c in _value_columns(df):
+        t = _norm(c)
+        if all(n in t for n in needles) and not any(x in t for x in exclude):
+            out.append(c)
+    return out
+
+
+def census_vulnerability_table(ts045: pd.DataFrame = None, ts037: pd.DataFrame = None, ts038: pd.DataFrame = None):
+    """One row per output area: oa, no_car_households (TS045), bad_health (TS037, bad plus very bad), limited_lot (TS038, day-to-day activities
+    limited a lot). A table passed as None gives a column of NaN. Returns (table, report); the report says which columns were summed, so a
+    change of wording in a release shows up in the printed output. A table whose columns cannot be found raises, rather than count nothing."""
+    rep, frames = {}, []
+
+    def one(df, name, out_col, needles_list, exclude=()):
+        if df is None:
+            return
+        cols = []
+        for needles in needles_list:
+            found = _columns_with(df, *needles, exclude=exclude)
+            if not found:
+                raise ValueError(f"{name}: no column holding {needles}. Columns present: {[str(c) for c in _value_columns(df)][:10]}")
+            cols += found
+        cols = list(dict.fromkeys(cols))
+        t = pd.DataFrame({"oa": df[_code_column(df)], out_col: df[cols].apply(pd.to_numeric, errors="coerce").sum(axis=1, min_count=1)})
+        rep[f"{out_col}_columns"] = [str(c) for c in cols]
+        frames.append(t)
+
+    one(ts045, "ts045", "no_car_households", [("no cars or vans",)])
+    one(ts037, "ts037", "bad_health", [("bad health",)])                       # matches "Bad health" and "Very bad health"; "Very good health" has no "bad"
+    one(ts038, "ts038", "limited_lot", [("limited a lot",)])
+    out = pd.DataFrame({"oa": pd.Series([], dtype="object")})
+    for t in frames:
+        out = t if out.empty else out.merge(t, on="oa", how="outer")
+    for c in ("no_car_households", "bad_health", "limited_lot"):
+        if c not in out:
+            out[c] = float("nan")
+    rep["rows"] = int(len(out))
+    return out[["oa", "no_car_households", "bad_health", "limited_lot"]], rep
 
 
 def find_iod_links(html: str, base: str = "https://www.gov.uk") -> list:

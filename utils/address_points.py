@@ -3,7 +3,7 @@
 # Address points for the exposure product, built from the ONS National Statistics UPRN Lookup (NSUL). Pure pandas and numpy, so it is
 # tested without Spark. The notebook (jobs/33_build_address_points) reads NSUL tile by tile and calls these.
 #
-# THE IDEA: each UPRN is a point. Census 2021 people, households and people aged 65 and over for its output area are shared equally among
+# THE IDEA: each UPRN is a point. Census 2021 people, households, people aged 65 and over and the three vulnerability counts for its output area are shared equally among
 # the output area's points, so people sit where the addresses are. The point then picks up its deprivation decile and the flood band at
 # its position, looked up in the rasters that job 30 painted. A point is never given the worst of a whole cell.
 #
@@ -33,12 +33,14 @@ NSUL_COLUMNS = {
     "UPRN": "uprn", "GRIDGB1E": "easting", "GRIDGB1N": "northing", "OA21CD": "oa", "LSOA21CD": "lsoa", "LAD25CD": "lad",
     "CTY25CD": "cty", "WD25CD": "ward", "PCON24CD": "pcon", "PFA23CD": "pfa", "RGN25CD": "rgn", "CTRY25CD": "ctry",
 }
-SHARE_COLS = ("population", "households", "age65plus")
-POINT_COLS = {"population": "people", "households": "households", "age65plus": "over65"}
+SHARE_COLS = ("population", "households", "age65plus", "no_car_households", "bad_health", "limited_lot")
+POINT_COLS = {"population": "people", "households": "households", "age65plus": "over65",
+              "no_car_households": "no_car_hh", "bad_health": "bad_health", "limited_lot": "limited_lot"}
 
 # the raster source folder and the column each becomes
 HAZARD_SOURCES = {
     "rofrs": "rofrs_rank",
+    "rofsw": "rofsw_rank",
     "flood_zones": "fz_rank",
     "flood_zones_sea": "fz_sea_rank",
     "flood_zones_river": "fz_river_rank",
@@ -74,6 +76,8 @@ def oa_shares(census: pd.DataFrame, counts: pd.DataFrame) -> pd.DataFrame:
     `census` has oa, population, households, age65plus; `counts` has oa, n_points."""
     d = census.merge(counts, on="oa", how="inner")
     for c in SHARE_COLS:
+        if c not in d:                      # a Census table loaded before the vulnerability columns existed: zeros, not an error
+            d[c] = np.nan
         d[POINT_COLS[c]] = d[c].astype("float64") / d["n_points"]
     return d[["oa", "n_points", *POINT_COLS.values()]]
 
@@ -115,7 +119,7 @@ def centroid_points(census: pd.DataFrame, counts: pd.DataFrame, centres: pd.Data
     if missing.empty:
         # nothing to place: every output area has at least one point
         cols = ["uprn", "easting", "northing", "oa", "lsoa", "lad", "ctyua", "ward", "pcon", "pfa", "rgn", "people", "households", "over65",
-                "cell_key", "imd_score", "imd_decile", "point_source", "tile", *(sources or HAZARD_SOURCES).values()]
+                "no_car_hh", "bad_health", "limited_lot", "cell_key", "imd_score", "imd_decile", "point_source", "tile", *(sources or HAZARD_SOURCES).values()]
         return pd.DataFrame(columns=cols), {"areas_without_points": 0, "placed_at_centre": 0, "people_placed": 0.0,
                                             "areas_with_no_centre": 0, "people_lost": 0.0}
     centres = centres.assign(oa=centres["oa"].astype(str))
@@ -129,6 +133,8 @@ def centroid_points(census: pd.DataFrame, counts: pd.DataFrame, centres: pd.Data
         "people": placed["population"].to_numpy(dtype="float64"), "households": placed["households"].to_numpy(dtype="float64"),
         "over65": placed["age65plus"].to_numpy(dtype="float64"),
     })
+    for c, col in (("no_car_households", "no_car_hh"), ("bad_health", "bad_health"), ("limited_lot", "limited_lot")):
+        d[col] = placed[c].fillna(0.0).to_numpy(dtype="float64") if c in placed else 0.0
     d["cell_key"] = cell_key(d["easting"].to_numpy(), d["northing"].to_numpy())
     d = d.merge(imd[["lsoa", "imd_score", "imd_decile"]], on="lsoa", how="left")
     d["point_source"] = "oa_centroid"
