@@ -301,31 +301,44 @@ def tile_signature(areas: pd.DataFrame, tile_counts: pd.DataFrame) -> dict:
     return {"areas": len(areas), "areas_hash": hashlib.sha1(ids.encode()).hexdigest(), "tiles": tiles}
 
 
-def save_tile_checkpoint(path: str, results, log, signature: dict) -> None:
-    """Save the per-tile sums (not address-level data) so a restart after the tile loop does not repeat it."""
-    import os
+def checkpoint_to_bytes(results, log, signature: dict) -> bytes:
+    """The per-tile sums (not address-level data), the log and the signature they were made from, as bytes, for a table or a file. The reader is
+    this module's checkpoint_from_bytes, and the table is written only by the job's own owners, so a pickle is acceptable here."""
     import pickle
+    return pickle.dumps({"signature": signature, "results": results, "log": log}, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def checkpoint_from_bytes(blob: bytes, signature: dict):
+    """(results, log, '') if `blob` holds results made from the same areas and tiles; otherwise (None, None, the reason)."""
+    import pickle
+    if not blob:
+        return None, None, "the saved results are empty"
+    try:
+        saved = pickle.loads(bytes(blob))
+    except Exception as e:                      # a corrupt or foreign payload
+        return None, None, f"the saved results could not be read ({str(e)[:80]})"
+    if not isinstance(saved, dict) or saved.get("signature") != signature:
+        return None, None, "the areas or the address points have changed since the results were saved"
+    return saved["results"], saved["log"], ""
+
+
+def save_tile_checkpoint(path: str, results, log, signature: dict) -> None:
+    """The same, to a file: written to a temporary name and renamed, so a half-written file is never trusted."""
+    import os
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = path + ".part"
     with open(tmp, "wb") as f:
-        pickle.dump({"signature": signature, "results": results, "log": log}, f)
-    os.replace(tmp, path)                      # never leave a half-written file that a later run might trust
+        f.write(checkpoint_to_bytes(results, log, signature))
+    os.replace(tmp, path)
 
 
 def load_tile_checkpoint(path: str, signature: dict):
-    """(results, log, '') if `path` holds results made from the same areas and tiles; otherwise (None, None, the reason)."""
+    """(results, log, '') from a file made by save_tile_checkpoint, or (None, None, the reason)."""
     import os
-    import pickle
     if not os.path.exists(path):
         return None, None, "no saved results at that path"
-    try:
-        with open(path, "rb") as f:
-            saved = pickle.load(f)
-    except Exception as e:                      # a corrupt or foreign file
-        return None, None, f"the saved file could not be read ({str(e)[:80]})"
-    if saved.get("signature") != signature:
-        return None, None, "the areas or the address points have changed since the results were saved"
-    return saved["results"], saved["log"], ""
+    with open(path, "rb") as f:
+        return checkpoint_from_bytes(f.read(), signature)
 
 
 def finish_area_geographies(area_geo: pd.DataFrame, exposure: pd.DataFrame, names: pd.DataFrame = None) -> pd.DataFrame:
