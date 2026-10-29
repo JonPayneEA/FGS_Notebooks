@@ -390,3 +390,6 @@ TBL_RFG_EXPOSURE      = f"{CATALOG}.{RESTRICTED_SCHEMA}.rfg_polygon_exposure"   
 TBL_RFG_CONSTITUENCIES = f"{CATALOG}.{RESTRICTED_SCHEMA}.rfg_polygon_constituencies"       # job 37: each polygon split by constituency
 TBL_RFG_AREAS         = f"{CATALOG}.{RESTRICTED_SCHEMA}.rfg_polygon_areas"                 # job 37: the people of each polygon in each warning or alert area
 TBL_RFG_SITES         = f"{CATALOG}.{RESTRICTED_SCHEMA}.rfg_polygon_sites"                 # job 37: the critical sites inside each polygon
+
+# ---- Economics (job 38) -----------------------------------------------------------------------------------------------------
+TBL_ECON_ASSUMPTIONS = f"{CATALOG}.{SCHEMA}.economics_assumptions"   # job 38: the probability per band and the damage per household (low, central, high) behind the indicative expected annual damage; edited by hand, never overwritten by the job
