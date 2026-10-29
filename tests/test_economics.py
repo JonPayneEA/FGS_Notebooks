@@ -12,12 +12,12 @@ from utils.economics import BANDS, SCENARIOS, central_probability, check_assumpt
 
 def test_defaults_give_a_probability_for_every_band_and_scenario_and_leave_the_damage_empty():
     d = default_rows()
-    assert len(d) == 4 * 3 + 3
+    assert len(d) == 4 * 3 + 3 + 3
     p = d[d["item"].str.startswith("prob_")]
     assert p["value"].notna().all() and len(p) == 12
     dm = d[d["item"] == "damage_per_household"]
     assert len(dm) == 3 and dm["value"].isna().all()
-    assert central_probability("high") == 0.05 and math.isclose(central_probability("medium"), math.sqrt(0.01 * 0.033))
+    assert central_probability("high") == 0.04 and math.isclose(central_probability("medium"), math.sqrt(0.01 * 0.033))
     assert check_assumptions(d) == []                                     # the seed is internally consistent
 
 
@@ -27,7 +27,7 @@ def test_a_rerun_adds_what_is_missing_and_never_overwrites_a_value_that_was_set(
     d = d[d["item"] != "prob_low"]                                         # a missing item comes back
     m = missing_rows(d)
     assert set(m["item"]) == {"prob_low"} and len(m) == 3
-    assert len(missing_rows(default_rows())) == 0 and len(missing_rows(None)) == 15
+    assert len(missing_rows(default_rows())) == 0 and len(missing_rows(None)) == 18
 
 
 def test_the_checks_name_the_problem():
@@ -40,3 +40,14 @@ def test_the_checks_name_the_problem():
     f = default_rows()
     f.loc[(f["item"] == "prob_very_low") & (f["scenario"] == "central"), "value"] = 0.5
     assert any("rarer band" in x for x in check_assumptions(f))
+
+
+def test_the_price_uplift_defaults_to_one_and_is_added_to_a_table_that_lacks_it():
+    d = default_rows()
+    u = d[d["item"] == "price_uplift"]
+    assert len(u) == 3 and (u["value"] == 1.0).all()
+    old = d[d["item"] != "price_uplift"]                                    # a table seeded before the uplift existed
+    assert set(missing_rows(old)["item"]) == {"price_uplift"} and len(missing_rows(old)) == 3
+    bad = default_rows()
+    bad.loc[(bad["item"] == "price_uplift") & (bad["scenario"] == "central"), "value"] = 0.0
+    assert any("price_uplift" in x for x in check_assumptions(bad))
