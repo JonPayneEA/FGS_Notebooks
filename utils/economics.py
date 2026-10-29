@@ -12,6 +12,10 @@
 # NaFRA2 chance of flooding in any year, by band: High over 3.3%, Medium 1 to 3.3%, Low 0.1 to 1%, Very Low under 0.1%. High has no top and Very Low
 # no bottom, so High is capped at 10% a year and Very Low floored at 0.01%. Both caps are assumptions, shown on screen.
 #
+# PRICES. Damage figures are quoted in one year's prices, and repair and rebuild costs have risen faster than general inflation. The table holds a
+# price_uplift for each scenario (default 1.0, no change). The app multiplies the damage figures from the table by it and says which year's prices result.
+# It does not apply to the provisional figures or to figures typed into the app, which are taken as they stand.
+#
 # THE DAMAGE FIGURES ARE NOT SET HERE. They are left empty for the economists (the Multi-Coloured Manual average per household, with its price year)
 # to enter in the table; the app says so and shows no pound figure until they do.
 # =============================================================================
@@ -49,6 +53,12 @@ def default_rows(now=None) -> pd.DataFrame:
                          "note": {"high": "Over 3.3% a year; no upper limit in the band, so capped at 10% (assumption).",
                                   "very_low": "Under 0.1% a year; no lower limit in the band, so floored at 0.01% (assumption)."}.get(band, "Band range from NaFRA2."),
                          "updated_at": now})
+    for scenario in SCENARIOS:
+        rows.append({"item": "price_uplift", "scenario": scenario, "value": 1.0, "unit": "multiplier on the damage per household",
+                     "source": "No uplift (1.0). Set it to bring the damage figures to today's prices with an index chosen by the economists (for example a construction tender price index or the GDP deflator)",
+                     "price_year": None,
+                     "note": "Set price_year to the year the uplifted figures are in. Repair costs and contents rise at different rates, so one factor is a simplification.",
+                     "updated_at": now})
     for scenario in SCENARIOS:
         rows.append({"item": "damage_per_household", "scenario": scenario, "value": None, "unit": "GBP per household per flood event",
                      "source": "To be set (for example the Multi-Coloured Manual average residential damage)", "price_year": None,
@@ -88,6 +98,10 @@ def check_assumptions(table: pd.DataFrame) -> list:
             problems.append("damage_per_household must not be negative.")
         if not (vals[0] <= vals[1] <= vals[2]):
             problems.append(f"{item} should run low, central, high in order.")
+    for s in SCENARIOS:
+        u = get("price_uplift", s)
+        if u is not None and u <= 0:
+            problems.append(f"price_uplift ({s}) must be above 0.")
     for s in SCENARIOS:
         ps = [get(f"prob_{b}", s) for b in BANDS]
         if all(p is not None for p in ps) and not all(ps[i] >= ps[i + 1] for i in range(3)):
