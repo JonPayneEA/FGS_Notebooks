@@ -11,7 +11,7 @@ from shapely.geometry import box
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.area_exposure import (  # noqa: E402
-    UNIQUE_SPLIT, VALUE_COLS, combine_tiles, constituency_with_gap, coverage_with_gap, area_cell_scores, finish_area_geographies, finish_areas, load_tile_checkpoint, save_tile_checkpoint, tile_signature, point_values, site_membership, site_stats, tile_stats, to_bng_polygons,
+    UNIQUE_SPLIT, VALUE_COLS, combine_tiles, constituency_with_gap, coverage_with_gap, area_cell_scores, checkpoint_from_bytes, checkpoint_to_bytes, finish_area_geographies, finish_areas, load_tile_checkpoint, save_tile_checkpoint, tile_signature, point_values, site_membership, site_stats, tile_stats, to_bng_polygons,
 )
 from utils.grid_build import points_to_cells  # noqa: E402
 
@@ -262,3 +262,16 @@ def test_area_risk_score_is_the_people_weighted_mean_of_cell_scores_inside_each_
     assert area_cell_scores(cells.iloc[0:0], GEOMS, IDS, KINDS).empty
     nothing = area_cell_scores(cells.assign(easting=1e6), GEOMS, IDS, KINDS)
     assert nothing.empty
+
+
+def test_checkpoint_bytes_round_trip_for_a_table_and_refuse_a_changed_signature_or_junk():
+    areas = pd.DataFrame({"kind": ["flood_warning"], "area_id": ["A"]})
+    sig = tile_signature(areas, pd.DataFrame({"tile": ["SE00"], "count": [5]}))
+    one = [tile_stats(make_points(), GEOMS, IDS, KINDS)]
+    blob = checkpoint_to_bytes([{k: combine_tiles([r[k] for r in one], None) for k in one[0]}], [{"tile": "SE00", "status": "done"}], sig)
+    assert isinstance(blob, bytes) and len(blob) > 100
+    got, log, why = checkpoint_from_bytes(bytearray(blob), sig)                      # a Spark binary column comes back as a bytearray
+    assert why == "" and log == [{"tile": "SE00", "status": "done"}] and set(got[0]) == set(one[0])
+    assert np.allclose(combine_tiles([g["area"] for g in got], None)["people"], combine_tiles([r["area"] for r in one], None)["people"])
+    assert "address points have changed" in checkpoint_from_bytes(blob, {**sig, "extra": ["x"]})[2]
+    assert checkpoint_from_bytes(b"junk", sig)[0] is None and checkpoint_from_bytes(b"", sig)[0] is None
