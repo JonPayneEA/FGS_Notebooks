@@ -275,3 +275,24 @@ def test_checkpoint_bytes_round_trip_for_a_table_and_refuse_a_changed_signature_
     assert np.allclose(combine_tiles([g["area"] for g in got], None)["people"], combine_tiles([r["area"] for r in one], None)["people"])
     assert "address points have changed" in checkpoint_from_bytes(blob, {**sig, "extra": ["x"]})[2]
     assert checkpoint_from_bytes(b"junk", sig)[0] is None and checkpoint_from_bytes(b"", sig)[0] is None
+
+
+def test_surface_water_and_vulnerability_columns_are_separate_from_rivers_and_sea():
+    pts = make_points().assign(rofsw_rank=[4, 0, 3, 1, 0, 0], no_car_hh=[1.0, 0.0, 2.0, 0.0, 1.0, 0.0],
+                               bad_health=[0.0, 1.0, 1.0, 0.0, 0.0, 1.0], limited_lot=[0.0, 0.0, 1.0, 1.0, 0.0, 0.0])
+    v = point_values(pts)
+    assert v.loc[0, "people_sw_high"] == 2 and v.loc[2, "people_sw_medium"] == 6 and v.loc[2, "people_sw_high_medium"] == 6 and v.loc[3, "people_sw_high_medium"] == 0
+    assert v.loc[0, "people_rs_high"] == 2                                  # the rivers and sea band does not move with the surface water band
+    assert v["no_car_households"].sum() == 4 and v["people_bad_health"].sum() == 3
+    assert v.loc[0, "no_car_households_rs_high_medium"] == 1 and v.loc[4, "no_car_households_rs_high_medium"] == 0      # point 4 has rank 0 rivers and sea
+    assert v.loc[2, "people_limited_lot_rs_high_medium"] == 0               # rank 2 is Low, not High or Medium
+    s = tile_stats(pts, [box(-1, -1, 1e6, 1e6)], ["ALL"], ["flood_warning"])["area"].loc[("flood_warning", "ALL")]
+    assert s["people_sw_high_medium"] == 8 and s["no_car_households"] == 4
+
+
+def test_points_without_the_new_columns_count_zero_and_the_checkpoint_signature_notices_the_measures():
+    v = point_values(make_points())
+    assert (v["people_sw_high_medium"] == 0).all() and (v["no_car_households"] == 0).all()
+    areas = pd.DataFrame({"kind": ["flood_warning"], "area_id": ["A"]})
+    sig = tile_signature(areas, pd.DataFrame({"tile": ["SE00"], "count": [5]}))
+    assert "measures_hash" in sig

@@ -31,7 +31,13 @@ BAND_PEOPLE = [f"people_rs_{b}" for b in RS_BANDS.values()]
 BAND_HOUSEHOLDS = [f"households_rs_{b}" for b in RS_BANDS.values()]
 FZ_PEOPLE = ["people_fz2", "people_fz3", "people_fz3_sea", "people_fz3_river", "people_fz3_both"]
 OTHER = ["people_rs_high_medium", "households_rs_high_medium", "people_imd_1_2", "imd_w", "imd_wsum"]
-VALUE_COLS = BASE + BAND_PEOPLE + BAND_HOUSEHOLDS + FZ_PEOPLE + OTHER
+# surface water by band: a separate hazard, shown as context and never added to the rivers and sea figures
+SW_PEOPLE = [f"people_sw_{b}" for b in RS_BANDS.values()] + ["people_sw_high_medium"]
+# Census vulnerability, as counts: households with no car or van, people in bad or very bad health, people whose day-to-day activities are
+# limited a lot; and the same counts inside the rivers and sea High or Medium band
+VULN = ["no_car_households", "people_bad_health", "people_limited_lot",
+        "no_car_households_rs_high_medium", "people_bad_health_rs_high_medium", "people_limited_lot_rs_high_medium"]
+VALUE_COLS = BASE + BAND_PEOPLE + BAND_HOUSEHOLDS + FZ_PEOPLE + OTHER + SW_PEOPLE + VULN
 # the measures that also get a unique and a split view
 UNIQUE_SPLIT = ["addresses", "people", "households", "over65", "people_rs_high_medium"]
 KINDS = ("flood_warning", "flood_alert")
@@ -46,7 +52,7 @@ GEO_VALUE_COLS = ["addresses", "people", "households", "over65", "people_rs_high
 
 def point_values(points: pd.DataFrame) -> pd.DataFrame:
     """The measures carried by each address point, one column each (float). `points` has people, households, over65, imd_decile, rofrs_rank and
-    the fz_*_rank columns. `addresses` is 1 for a real address and 0 for an output area centre point (which carries people but is not an address)."""
+    the fz_*_rank columns, and optionally rofsw_rank, no_car_hh, bad_health and limited_lot (absent: zeros). `addresses` is 1 for a real address and 0 for an output area centre point (which carries people but is not an address)."""
     d = pd.DataFrame(index=points.index)
     people = pd.to_numeric(points["people"], errors="coerce").fillna(0.0)
     hh = pd.to_numeric(points["households"], errors="coerce").fillna(0.0)
@@ -64,6 +70,14 @@ def point_values(points: pd.DataFrame) -> pd.DataFrame:
     d["people_fz3"] = people.where(fz == 2, 0.0)
     for col, name in (("fz_sea_rank", "people_fz3_sea"), ("fz_river_rank", "people_fz3_river"), ("fz_river_and_sea_rank", "people_fz3_both")):
         d[name] = people.where(pd.to_numeric(points[col], errors="coerce").fillna(0) == 2, 0.0) if col in points else 0.0
+    sw = pd.to_numeric(points["rofsw_rank"], errors="coerce").fillna(0) if "rofsw_rank" in points else pd.Series(0, index=points.index)
+    for r, name in RS_BANDS.items():
+        d[f"people_sw_{name}"] = people.where(sw == r, 0.0)
+    d["people_sw_high_medium"] = people.where(sw >= 3, 0.0)
+    for src, name in (("no_car_hh", "no_car_households"), ("bad_health", "people_bad_health"), ("limited_lot", "people_limited_lot")):
+        v = pd.to_numeric(points[src], errors="coerce").fillna(0.0) if src in points else pd.Series(0.0, index=points.index)
+        d[name] = v
+        d[f"{name}_rs_high_medium"] = v.where(rank >= 3, 0.0)
     dec = pd.to_numeric(points["imd_decile"], errors="coerce")
     d["people_imd_1_2"] = people.where(dec <= 2, 0.0)
     d["imd_w"] = np.where(dec.notna(), people * dec.fillna(0), 0.0)
@@ -298,7 +312,9 @@ def tile_signature(areas: pd.DataFrame, tile_counts: pd.DataFrame) -> dict:
     ids = "|".join(sorted(areas["kind"].astype(str) + ":" + areas["area_id"].astype(str)))
     tiles = {str(t): int(n) for t, n in zip(tile_counts["tile"], tile_counts["count"])}
     import hashlib
-    return {"areas": len(areas), "areas_hash": hashlib.sha1(ids.encode()).hexdigest(), "tiles": tiles}
+    # the measure columns are part of the signature, so results saved before a measure was added are recomputed, not reused with the column missing
+    return {"areas": len(areas), "areas_hash": hashlib.sha1(ids.encode()).hexdigest(), "tiles": tiles,
+            "measures_hash": hashlib.sha1("|".join(VALUE_COLS).encode()).hexdigest()}
 
 
 def checkpoint_to_bytes(results, log, signature: dict) -> bytes:

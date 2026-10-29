@@ -103,3 +103,14 @@ def test_nothing_to_place_returns_an_empty_frame_even_when_the_centres_table_has
     imd = pd.DataFrame({"lsoa": ["L1"], "imd_score": [1.0], "imd_decile": [1]})
     pts, rep = centroid_points(census, counts, centres, imd, str(tmp_path))
     assert len(pts) == 0 and rep["areas_without_points"] == 0 and "rofrs_rank" in pts.columns
+
+
+def test_vulnerability_counts_are_shared_among_the_points_of_an_output_area_and_old_census_tables_still_work():
+    from utils.address_points import oa_shares
+    census = pd.DataFrame({"oa": ["O1"], "population": [10.0], "households": [4.0], "age65plus": [2.0],
+                           "no_car_households": [2.0], "bad_health": [1.0], "limited_lot": [3.0]})
+    counts = pd.DataFrame({"oa": ["O1"], "n_points": [2]})
+    s = oa_shares(census, counts).iloc[0]
+    assert s["no_car_hh"] == 1.0 and s["bad_health"] == 0.5 and s["limited_lot"] == 1.5 and s["people"] == 5.0
+    old = oa_shares(census[["oa", "population", "households", "age65plus"]], counts).iloc[0]
+    assert np.isnan(old["bad_health"]) and old["people"] == 5.0

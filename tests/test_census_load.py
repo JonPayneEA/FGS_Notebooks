@@ -113,3 +113,26 @@ def test_the_report_gives_the_size_of_any_age_table_difference():
     _, rep = census_oa_table(ts001, ts007a, None)
     assert rep["age_total_differs_from_population_in"] == 2 and rep["age_total_max_difference"] == 20
     assert rep["age_total_differs_by_more_than_5"] == 1 and rep["age_total_difference_in_people"] == 21
+
+
+def test_vulnerability_table_sums_the_columns_found_by_their_text():
+    import pytest
+    from utils.census_load import census_vulnerability_table
+    ts045 = pd.DataFrame({"date": 2021, "geography": ["a", "b"], "geography code": ["E00000001", "E00000002"],
+                          "Car or van availability: Total: All households": [10, 20], "Car or van availability: No cars or vans in household": [3, 5],
+                          "Car or van availability: 1 car or van in household": [7, 15]})
+    ts037 = pd.DataFrame({"date": 2021, "geography": ["a", "b"], "geography code": ["E00000001", "E00000002"],
+                          "General health: Total: All usual residents": [30, 50], "General health: Very good health": [10, 20],
+                          "General health: Bad health": [2, 3], "General health: Very bad health": [1, 1]})
+    ts038 = pd.DataFrame({"date": 2021, "geography": ["a", "b"], "geography code": ["E00000001", "E00000002"],
+                          "Disability: Total: All usual residents": [30, 50],
+                          "Disability: Disabled under the Equality Act: Day-to-day activities limited a lot": [4, 6],
+                          "Disability: Disabled under the Equality Act: Day-to-day activities limited a little": [5, 7]})
+    t, rep = census_vulnerability_table(ts045, ts037, ts038)
+    assert list(t["oa"]) == ["E00000001", "E00000002"]
+    assert list(t["no_car_households"]) == [3, 5] and list(t["bad_health"]) == [3, 4] and list(t["limited_lot"]) == [4, 6]
+    assert len(rep["bad_health_columns"]) == 2
+    with pytest.raises(ValueError):
+        census_vulnerability_table(ts045.drop(columns=["Car or van availability: No cars or vans in household"]), None, None)
+    t2, _ = census_vulnerability_table(ts045, None, None)
+    assert t2["bad_health"].isna().all()
