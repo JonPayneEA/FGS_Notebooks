@@ -101,3 +101,24 @@ def test_strips_of_points_add_up_to_the_same_answer_as_one_read():
     assert list(m["sites"]["name"]) == ["School"]
     empty = merge_exposure([rfg_exposure(pts.iloc[0:0], *args)])
     assert empty["polygon"]["people"].iloc[0] == 0 and empty["constituency"].empty
+
+
+def test_job_36_can_import_the_parsing_helpers_without_shapely():
+    import subprocess
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    code = f"""
+import sys
+sys.modules['shapely'] = None          # as if shapely were not installed
+sys.path.insert(0, {root!r})
+import utils.rfg as r
+u, p = r.parse_update({{'id': 1, 'status': 'Rapid Flooding Guidance Present', 'polygons': []}}, 'now')
+assert u['update_key'] == '1' and r._HAVE_SHAPELY is False
+try:
+    r.rfg_exposure(None, [], [])
+except ImportError as e:
+    assert 'shapely' in str(e)
+else:
+    raise SystemExit('rfg_exposure should need shapely')
+"""
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
