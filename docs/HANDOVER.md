@@ -24,7 +24,9 @@ The four master notebooks in `master/` run the scheduled jobs. Schedule them wit
 | `Master_weekly` | Weekly | Flood areas, MP contacts, the area and constituency lookup |
 | `Master_quarterly` | Quarterly | Constituency boundaries, the lookup |
 
-These are not scheduled. They are built by hand, in this order, when their inputs change: 29 census, 30 hazard rasters, 31 critical sites, 32 responder geographies, 33 address points, 34 exposure grid, 35 warning area exposure. Job 38 is also by hand (section 4).
+`master/Master_exposure` runs the exposure chain (jobs 33, 34 and 35) by hand. It is not scheduled. Start it from job 35 after the flood areas change, from 34 after the grid inputs change, and from 33 for a full rebuild. It always runs job 33 with `resume = yes`, and if a step ends with failed tiles it stops, and you run it again with the same start.
+
+These are also by hand, in this order, when their source changes: 29 census and deprivation, 30 hazard rasters, 31 critical sites, 32 responder geographies. Each needs a person to point it at a new file or page, or changes only when its source does. Run the ones that changed, then `Master_exposure` from job 33. Job 38 is by hand too (section 4).
 
 ## 3. Rules that have cost time
 

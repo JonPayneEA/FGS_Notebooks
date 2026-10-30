@@ -1170,7 +1170,7 @@ ones. See "History is an archive" above.
 │   ├── 29_load_census_deprivation     Census 2021 by output area and the IoD2025 by LSOA, for the exposure grid (manual)
 │   └── 28_link_thresholds_to_gauges   Observed flood warning thresholds linked to gauge measures, restricted schema (manual)
 ├── master/                            Schedule these notebooks
-│   ├── Master_polling, Master_daily, Master_weekly, Master_quarterly
+│   ├── Master_polling, Master_daily, Master_weekly, Master_quarterly, Master_exposure (by hand)
 ├── explore/
 │   └── Explore_live_readings          Filter and plot the readings, with an archive | live line (by hand)
 ├── dashboards/
