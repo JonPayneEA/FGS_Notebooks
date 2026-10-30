@@ -19,9 +19,19 @@ import json
 
 import numpy as np
 import pandas as pd
-import shapely
 
-from .area_exposure import VALUE_COLS, point_values, site_membership
+# shapely is needed only to count what lies under a polygon (job 37), not to read and store the updates (job 36). Job 36 must run on compute that has no
+# shapely, so the import is allowed to fail here and is checked where it is used.
+try:
+    import shapely
+
+    from .area_exposure import VALUE_COLS, point_values, site_membership
+    _HAVE_SHAPELY = True
+except ImportError:                         # pragma: no cover - exercised by a test that hides shapely
+    shapely = None
+    VALUE_COLS = []
+    point_values = site_membership = None
+    _HAVE_SHAPELY = False
 
 NO_GUIDANCE_STATUS = "No Rapid Flood Guidance at this time"
 PRESENT_STATUS = "Rapid Flooding Guidance Present"
@@ -112,6 +122,8 @@ def rfg_exposure(points: pd.DataFrame, polys, keys, area_polys=None, area_ids=No
       areas           (polygon_key, kind, area_id, area_name): addresses, people, people_rs_high_medium  (people of the polygon who are in that area)
       sites           one row per critical site inside a polygon: polygon_key, site_id, name, site_group, site_type, band, rofrs_rank
     People counted in two areas of one kind appear once in each; the polygon row is the distinct total."""
+    if not _HAVE_SHAPELY:
+        raise ImportError("rfg_exposure needs shapely: install it with %pip install shapely")
     keys = list(keys)
     zero = pd.DataFrame(0.0, index=pd.Index(keys, name="polygon_key"), columns=EXPOSURE_COLS)
     if not len(keys):
