@@ -85,9 +85,11 @@ def get_spark() -> SparkSession:
 # Other status codes are returned to the caller to handle.
 # -----------------------------------------------------------------------------
 def get_with_retry(url: str, headers: dict = None, params: dict = None,
-                   timeout: int = 30, attempts: int = 4) -> requests.Response:
+                   timeout: int = 30, attempts: int = 4, backoff: int = 2) -> requests.Response:
     """
-    GET a URL, retrying transient failures with backoff (2s, 4s, 8s ...).
+    GET a URL, retrying transient failures with backoff (2s, 4s, 8s ... by default).
+    `backoff` is the first wait in seconds and it doubles after each failure: a slow
+    service that answers 504 after minutes needs a longer first wait than 2s.
 
     Returns:
         The final Response. Raises the last connection error if every attempt
@@ -106,7 +108,7 @@ def get_with_retry(url: str, headers: dict = None, params: dict = None,
             final_response = None
 
         if attempt < attempts - 1:
-            time.sleep(2 ** (attempt + 1))
+            time.sleep(backoff * 2 ** attempt)
 
     if final_response is not None:
         return final_response

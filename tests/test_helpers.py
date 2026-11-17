@@ -300,3 +300,31 @@ def test_reading_rows_dedupe_on_measure_and_time_last_wins():
     assert len(rows) == 2
     assert [r["value"] for r in sorted(rows, key=lambda r: r["date_time"])] == [2, 3]
     assert reading_rows_from_items(None, now) == []
+
+
+def test_get_with_retry_waits_longer_when_given_a_backoff(monkeypatch):
+    from utils import helpers
+    waits = []
+    monkeypatch.setattr(helpers.time, "sleep", lambda s: waits.append(s))
+
+    class R:
+        def __init__(self, code): self.status_code = code
+
+    seq = iter([R(504), R(504), R(200)])
+    monkeypatch.setattr(helpers.requests, "get", lambda *a, **k: next(seq))
+    assert helpers.get_with_retry("http://x", attempts=3, backoff=30).status_code == 200
+    assert waits == [30, 60]                                            # the first wait is the backoff, then it doubles
+
+
+def test_get_with_retry_default_backoff_is_unchanged(monkeypatch):
+    from utils import helpers
+    waits = []
+    monkeypatch.setattr(helpers.time, "sleep", lambda s: waits.append(s))
+
+    class R:
+        def __init__(self, code): self.status_code = code
+
+    seq = iter([R(503), R(503), R(503)])
+    monkeypatch.setattr(helpers.requests, "get", lambda *a, **k: next(seq))
+    assert helpers.get_with_retry("http://x", attempts=3).status_code == 503
+    assert waits == [2, 4]
