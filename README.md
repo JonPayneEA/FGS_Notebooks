@@ -14,6 +14,16 @@ whole polling run happens every 15 minutes.
 
 ---
 
+## Data model
+
+Every table the pipeline builds, grouped by what it is for, with the job (notebook) that builds each one. A thick border marks the restricted schema. The dashed arrows are the tables the Flood Planning App reads most directly. Open the [SVG](docs/data_model.svg) to zoom in, or the [PNG](docs/data_model.png).
+
+![The FGS pipeline data model: tables by domain, the jobs that build them and the sources they come from](docs/data_model.svg)
+
+The diagram is generated from `docs/data_model.py`. When a job or a table changes, edit the `TABLES` and `EDGES` lists there, run `python docs/data_model.py` (it needs Graphviz) and commit both images.
+
+---
+
 ## Before you start
 
 ### 0. Python packages (serverless and classic compute)
