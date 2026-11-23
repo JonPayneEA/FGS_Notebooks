@@ -3,3 +3,4 @@
 # Python / test artefacts
 __pycache__/
 .pytest_cache/
+docs/data_model.dot
